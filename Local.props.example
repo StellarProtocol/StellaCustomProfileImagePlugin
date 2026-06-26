@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Path to your local game_mini folder. Copy this file to Local.props and fill in your path. -->
+    <!-- Used by the DeployPlugin target to copy the built DLL to the game's plugin directory. -->
+    <GameInstallDir>C:\path\to\game_mini</GameInstallDir>
+  </PropertyGroup>
+</Project>
