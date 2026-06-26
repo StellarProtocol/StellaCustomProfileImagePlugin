@@ -28,17 +28,4 @@
     <Compile Remove="resources/**" />
   </ItemGroup>
 
-  <!-- Post-build: copy DLL to local plugins/ and (if GameInstallDir is set) to game dir -->
-  <PropertyGroup>
-    <PluginDeployDir>$(MSBuildThisFileDirectory)plugins\customprofleimage\</PluginDeployDir>
-    <GamePluginDir Condition="'$(GameInstallDir)' != ''">$(GameInstallDir)\stellar\plugins\customprofleimage\</GamePluginDir>
-  </PropertyGroup>
-
-  <Target Name="DeployPlugin" AfterTargets="Build">
-    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(PluginDeployDir)" />
-    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(GamePluginDir)"
-          Condition="'$(GamePluginDir)' != ''" />
-    <Warning Text="Local.props not found — skipping game deploy. Copy Local.props.example to Local.props and set GameInstallDir."
-             Condition="'$(GamePluginDir)' == ''" />
-  </Target>
 </Project>
