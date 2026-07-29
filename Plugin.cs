@@ -148,7 +148,9 @@ public sealed class Plugin : IStellarPlugin
                 DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 460f, 20f, 440f, 0f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
-            { Draggable = true, Closable = true, StartVisible = false },
+            { Draggable = true, Closable = true, StartVisible = false,
+              // Gameplay tool: upload requires being in-world (checks Z.EntityMgr.PlayerEnt).
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World },
             Root:    new ColumnElement(elements.ToArray(), Gap: 8f),
             OnClose: () => _window.SetVisible(false)));
     }
