@@ -150,7 +150,8 @@ public sealed class Plugin : IStellarPlugin
                 Style:       WindowPanelStyle.GlassMenu)
             { Draggable = true, Closable = true, StartVisible = false,
               // Gameplay tool: upload requires being in-world (checks Z.EntityMgr.PlayerEnt).
-              ShouldRender = () => _services.ClientState.Phase == GamePhase.World },
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
             Root:    new ColumnElement(elements.ToArray(), Gap: 8f),
             OnClose: () => _window.SetVisible(false)));
     }
