@@ -18,8 +18,6 @@ public sealed class Plugin : IStellarPlugin
     private          IWindowControl  _window = null!;
     private readonly IDisposable     _launcherEntry;
 
-    private object?     _luaState;
-    private MethodInfo? _luaDoString;
     private Harmony?    _luaReadyHarmony;
 
     private string _avatarUploadStatus   = "";
@@ -35,7 +33,8 @@ public sealed class Plugin : IStellarPlugin
     private volatile string? _pendingSelectedPath = null;
     private volatile bool    _dialogOpen          = false;
 
-    // Re-entrancy guard: ProcessAvatarUpload calls CallLua which fires DoString again.
+    // Re-entrancy guard: ProcessAvatarUpload calls _services.Lua.DoString, which re-enters the
+    // LuaState.DoString patch and fires OnLuaDoStringStatic again.
     [System.ThreadStatic]
     private static bool _inLuaTick;
 
@@ -44,7 +43,6 @@ public sealed class Plugin : IStellarPlugin
         _instance = this;
         _services = services;
 
-        EnsureLuaState();
         InstallLuaReadyTrigger();
         _services.Framework.Update += OnFrameworkUpdate;
 
@@ -181,7 +179,7 @@ public sealed class Plugin : IStellarPlugin
 
     private void InstallLuaReadyTrigger()
     {
-        var lsType = FindType("LuaInterface.LuaState");
+        var lsType = StellarInterop.FindType("LuaInterface.LuaState");
         if (lsType == null) { _services.Log.Info("[CustomProfileImage] LuaReadyTrigger: LuaState not found"); return; }
 
         MethodInfo? target = null;
@@ -200,7 +198,7 @@ public sealed class Plugin : IStellarPlugin
 
         // Hook UpdateManager.Update — AOT-compiled, fires every Unity frame,
         // gives us a reliable per-frame tick independent of DoString frequency.
-        var umType = FindType("UpdateManager");
+        var umType = StellarInterop.FindType("UpdateManager");
         if (umType != null)
         {
             var umUpdate = umType.GetMethod("Update",
@@ -258,9 +256,6 @@ public sealed class Plugin : IStellarPlugin
     {
         if (_instance == null || _inLuaTick) return;
 
-        if (_instance._luaDoString == null)
-            _instance.EnsureLuaState();
-
         _inLuaTick = true;
         try
         {
@@ -276,80 +271,6 @@ public sealed class Plugin : IStellarPlugin
             }
         }
         finally { _inLuaTick = false; }
-    }
-
-    // ── Lua state ─────────────────────────────────────────────────────────────
-
-    private void EnsureLuaState()
-    {
-        if (_luaDoString != null) return;
-
-        var lsType = FindType("LuaInterface.LuaState");
-        if (lsType != null)
-        {
-            _luaState =
-                lsType.GetProperty("mainState", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(null)
-                ?? lsType.GetField("mainState",  BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(null);
-        }
-
-        if (_luaState is null)
-        {
-            var clientType = FindType("LuaClient");
-            var clientInst = clientType
-                ?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)
-                ?.GetValue(null);
-            if (clientInst != null)
-            {
-                var t = clientInst.GetType();
-                _luaState =
-                    t.GetProperty("luaState", BindingFlags.Instance | BindingFlags.Public)?.GetValue(clientInst)
-                    ?? t.GetField("luaState", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(clientInst);
-            }
-        }
-
-        if (_luaState != null)
-        {
-            foreach (var m in _luaState.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-            {
-                if (m.Name != "DoString" || m.IsGenericMethod) continue;
-                var ps = m.GetParameters();
-                if (ps.Length < 1 || ps[0].ParameterType != typeof(string)) continue;
-                if (m.ReturnType == typeof(void) && ps.Length >= 2 && _luaDoString == null)
-                    _luaDoString = m;
-            }
-        }
-
-        _services.Log.Info($"[CustomProfileImage] LuaState={_luaState?.GetType()?.FullName ?? "null"} DoString={(_luaDoString != null ? "ok" : "null")}");
-    }
-
-    private string? CallLua(string chunk)
-    {
-        if (_luaState is null || _luaDoString is null)
-        {
-            _services.Log.Warning("[CustomProfileImage] CallLua: LuaState not ready");
-            return "LuaState not ready";
-        }
-        try
-        {
-            _luaDoString.Invoke(_luaState, new object[] { chunk, "customprofleimage" });
-            return null;
-        }
-        catch (Exception ex)
-        {
-            var msg = ex.InnerException?.Message ?? ex.Message;
-            _services.Log.Warning($"[CustomProfileImage] CallLua threw: {msg}");
-            return msg;
-        }
-    }
-
-    private static Type? FindType(string fullName)
-    {
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            var t = asm.GetType(fullName);
-            if (t is not null) return t;
-        }
-        return null;
     }
 
     // ── Lua global helpers ────────────────────────────────────────────────────
@@ -478,13 +399,14 @@ public sealed class Plugin : IStellarPlugin
 
         _avatarUploadStatus = "Starting...";
         _window.MarkDirty();
-        EnsureLuaState();
 
-        if (_luaDoString == null) { _avatarUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
+        if (!_services.Lua.Ready) { _avatarUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
 
-        // Synchronous errors propagate to C# via error() -> CallLua returns the message.
+        // Setup runs under pcall; a synchronous error() is parked in a status global and read back
+        // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
         // Async handlers (server callbacks) use pcall + LuaSetStatus internally.
-        var setupErr = CallLua(
+        _services.Lua.DoString(
+            "_G.__stlr_av_setup=nil local _stlrOk,_stlrErr=pcall(function()" +
             " if not (Z.EntityMgr).PlayerEnt then error('Need world: enter game first') end" +
             " local stub=require('zservice/photograph_ntf_impl')" +
             " local origRet=stub.RetAvatarToken" +
@@ -547,7 +469,10 @@ public sealed class Plugin : IStellarPlugin
             "  popupCls.setHeadImg=origSetHead" +
             "  " + LuaSetStatus("'Portrait confirm fired texId='..tostring(texId)..' snap='..tostring(snapType)") +
             "  origGetToken(texId,snapType)" +
-            " end");
+            " end" +
+            " end)" +
+            " if not _stlrOk then _G.__stlr_av_setup=tostring(_stlrErr) end");
+        var setupErr = _services.Lua.ReadGlobalString("__stlr_av_setup");
 
         _services.Log.Info($"[CustomProfileImage] avatar setup: {(setupErr == null ? "ok" : setupErr)}");
         if (setupErr != null)
@@ -567,8 +492,7 @@ public sealed class Plugin : IStellarPlugin
 
     private void ClearAvatarHooks()
     {
-        EnsureLuaState();
-        CallLua(
+        _services.Lua.DoString(
             "pcall(function()" +
             " local ok,stub=pcall(require,'zservice/photograph_ntf_impl')" +
             " if ok and stub then" +
@@ -602,11 +526,13 @@ public sealed class Plugin : IStellarPlugin
 
         _namecardUploadStatus = "Starting...";
         _window.MarkDirty();
-        EnsureLuaState();
 
-        if (_luaDoString == null) { _namecardUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
+        if (!_services.Lua.Ready) { _namecardUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
 
-        var setupErr = CallLua(
+        // Setup runs under pcall; a synchronous error() is parked in a status global and read back
+        // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
+        _services.Lua.DoString(
+            "_G.__stlr_nc_setup=nil local _stlrOk,_stlrErr=pcall(function()" +
             " if not (Z.EntityMgr).PlayerEnt then error('Need world: enter game first') end" +
             " local stub=require('zservice/photograph_ntf_impl')" +
             " local origRet=stub.RetAvatarToken" +
@@ -671,7 +597,10 @@ public sealed class Plugin : IStellarPlugin
             "  idcardCls.setPhotoData=origSetPhoto" +
             "  " + LuaSetNcStatus("'Namecard confirm fired texId='..tostring(texId)..' snap='..tostring(snapType)") +
             "  origGetToken(texId,snapType)" +
-            " end");
+            " end" +
+            " end)" +
+            " if not _stlrOk then _G.__stlr_nc_setup=tostring(_stlrErr) end");
+        var setupErr = _services.Lua.ReadGlobalString("__stlr_nc_setup");
 
         _services.Log.Info($"[CustomProfileImage] namecard setup: {(setupErr == null ? "ok" : setupErr)}");
         if (setupErr != null)
@@ -691,8 +620,7 @@ public sealed class Plugin : IStellarPlugin
 
     private void ClearNamecardHooks()
     {
-        EnsureLuaState();
-        CallLua(
+        _services.Lua.DoString(
             "pcall(function()" +
             " local ok,stub=pcall(require,'zservice/photograph_ntf_impl')" +
             " if ok and stub then" +
