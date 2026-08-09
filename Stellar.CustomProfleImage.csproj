@@ -9,15 +9,15 @@
     <NoWarn>CS8632;CS8765</NoWarn>
     <RootNamespace>Stellar.CustomProfleImage</RootNamespace>
     <AssemblyName>Stellar.CustomProfleImage</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Deterministic>true</Deterministic>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Stellar.Abstractions"       Version="1.2.0" />
-    <PackageReference Include="Stellar.PluginContracts"    Version="1.1.1" />
-    <PackageReference Include="Stellar.Plugin.InteropRefs" Version="1.1.1" />
+    <PackageReference Include="Stellar.Abstractions"       Version="2.0.0" />
+    <PackageReference Include="Stellar.PluginContracts"    Version="2.0.0" />
+    <PackageReference Include="Stellar.Plugin.InteropRefs" Version="2.0.0" />
   </ItemGroup>
 
   <ItemGroup>

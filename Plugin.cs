@@ -8,7 +8,7 @@ using Stellar.Abstractions.Services;
 
 namespace Stellar.CustomProfleImage;
 
-public sealed class Plugin : IStellarPlugin
+public sealed partial class Plugin : IStellarPlugin
 {
     public string Name => "CustomProfileImage";
 
@@ -18,8 +18,6 @@ public sealed class Plugin : IStellarPlugin
     private          IWindowControl  _window = null!;
     private readonly IDisposable     _launcherEntry;
 
-    private object?     _luaState;
-    private MethodInfo? _luaDoString;
     private Harmony?    _luaReadyHarmony;
 
     private string _avatarUploadStatus   = "";
@@ -35,7 +33,8 @@ public sealed class Plugin : IStellarPlugin
     private volatile string? _pendingSelectedPath = null;
     private volatile bool    _dialogOpen          = false;
 
-    // Re-entrancy guard: ProcessAvatarUpload calls CallLua which fires DoString again.
+    // Re-entrancy guard: ProcessAvatarUpload calls _services.Lua.DoString, which re-enters the
+    // LuaState.DoString patch and fires OnLuaDoStringStatic again.
     [System.ThreadStatic]
     private static bool _inLuaTick;
 
@@ -44,7 +43,6 @@ public sealed class Plugin : IStellarPlugin
         _instance = this;
         _services = services;
 
-        EnsureLuaState();
         InstallLuaReadyTrigger();
         _services.Framework.Update += OnFrameworkUpdate;
 
@@ -55,7 +53,8 @@ public sealed class Plugin : IStellarPlugin
             IconPng: LoadIconPng(),
             IconKey: null,
             OnOpen:  () => _window.SetVisible(true))
-        { Group = LauncherGroup.Plugin });
+        { Group = LauncherGroup.Plugin,
+          ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
 
         _services.Log.Info("[CustomProfileImage] constructed");
     }
@@ -148,7 +147,10 @@ public sealed class Plugin : IStellarPlugin
                 DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 460f, 20f, 440f, 0f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
-            { Draggable = true, Closable = true, StartVisible = false },
+            { Draggable = true, Closable = true, StartVisible = false,
+              // Gameplay tool: upload requires being in-world (checks Z.EntityMgr.PlayerEnt).
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
             Root:    new ColumnElement(elements.ToArray(), Gap: 8f),
             OnClose: () => _window.SetVisible(false)));
     }
@@ -177,7 +179,7 @@ public sealed class Plugin : IStellarPlugin
 
     private void InstallLuaReadyTrigger()
     {
-        var lsType = FindType("LuaInterface.LuaState");
+        var lsType = StellarInterop.FindType("LuaInterface.LuaState");
         if (lsType == null) { _services.Log.Info("[CustomProfileImage] LuaReadyTrigger: LuaState not found"); return; }
 
         MethodInfo? target = null;
@@ -196,7 +198,7 @@ public sealed class Plugin : IStellarPlugin
 
         // Hook UpdateManager.Update — AOT-compiled, fires every Unity frame,
         // gives us a reliable per-frame tick independent of DoString frequency.
-        var umType = FindType("UpdateManager");
+        var umType = StellarInterop.FindType("UpdateManager");
         if (umType != null)
         {
             var umUpdate = umType.GetMethod("Update",
@@ -254,9 +256,6 @@ public sealed class Plugin : IStellarPlugin
     {
         if (_instance == null || _inLuaTick) return;
 
-        if (_instance._luaDoString == null)
-            _instance.EnsureLuaState();
-
         _inLuaTick = true;
         try
         {
@@ -272,80 +271,6 @@ public sealed class Plugin : IStellarPlugin
             }
         }
         finally { _inLuaTick = false; }
-    }
-
-    // ── Lua state ─────────────────────────────────────────────────────────────
-
-    private void EnsureLuaState()
-    {
-        if (_luaDoString != null) return;
-
-        var lsType = FindType("LuaInterface.LuaState");
-        if (lsType != null)
-        {
-            _luaState =
-                lsType.GetProperty("mainState", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(null)
-                ?? lsType.GetField("mainState",  BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(null);
-        }
-
-        if (_luaState is null)
-        {
-            var clientType = FindType("LuaClient");
-            var clientInst = clientType
-                ?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)
-                ?.GetValue(null);
-            if (clientInst != null)
-            {
-                var t = clientInst.GetType();
-                _luaState =
-                    t.GetProperty("luaState", BindingFlags.Instance | BindingFlags.Public)?.GetValue(clientInst)
-                    ?? t.GetField("luaState", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(clientInst);
-            }
-        }
-
-        if (_luaState != null)
-        {
-            foreach (var m in _luaState.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-            {
-                if (m.Name != "DoString" || m.IsGenericMethod) continue;
-                var ps = m.GetParameters();
-                if (ps.Length < 1 || ps[0].ParameterType != typeof(string)) continue;
-                if (m.ReturnType == typeof(void) && ps.Length >= 2 && _luaDoString == null)
-                    _luaDoString = m;
-            }
-        }
-
-        _services.Log.Info($"[CustomProfileImage] LuaState={_luaState?.GetType()?.FullName ?? "null"} DoString={(_luaDoString != null ? "ok" : "null")}");
-    }
-
-    private string? CallLua(string chunk)
-    {
-        if (_luaState is null || _luaDoString is null)
-        {
-            _services.Log.Warning("[CustomProfileImage] CallLua: LuaState not ready");
-            return "LuaState not ready";
-        }
-        try
-        {
-            _luaDoString.Invoke(_luaState, new object[] { chunk, "customprofleimage" });
-            return null;
-        }
-        catch (Exception ex)
-        {
-            var msg = ex.InnerException?.Message ?? ex.Message;
-            _services.Log.Warning($"[CustomProfileImage] CallLua threw: {msg}");
-            return msg;
-        }
-    }
-
-    private static Type? FindType(string fullName)
-    {
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            var t = asm.GetType(fullName);
-            if (t is not null) return t;
-        }
-        return null;
     }
 
     // ── Lua global helpers ────────────────────────────────────────────────────
@@ -440,7 +365,7 @@ public sealed class Plugin : IStellarPlugin
         finally { Marshal.FreeHGlobal(buf); }
     }
 
-    // ── File pick + upload actions ────────────────────────────────────────────
+    // ── File pick ──────────────────────────────────────────────────────────────
 
     private void ChooseFile()
     {
@@ -449,266 +374,6 @@ public sealed class Plugin : IStellarPlugin
             if (picked != null)
                 _pendingSelectedPath = picked;
         });
-    }
-
-    private void MakeAvatar()
-    {
-        if (_namecardHooksActive) { ClearNamecardHooks(); _namecardUploadStatus = ""; }
-        ProcessAvatarUpload(_selectedImagePath);
-    }
-
-    private void MakeNamecard()
-    {
-        if (_avatarHooksActive) { ClearAvatarHooks(); _avatarUploadStatus = ""; }
-        ProcessNamecardUpload(_selectedImagePath);
-    }
-
-    // ── Avatar upload ─────────────────────────────────────────────────────────
-
-    private void ProcessAvatarUpload(string picked)
-    {
-        if (!System.IO.File.Exists(picked)) { _avatarUploadStatus = "File not found"; _window.MarkDirty(); return; }
-
-        var luaFilePath = picked.Replace(@"\", @"\\");
-        var fileUrl     = "file:///" + picked.Replace('\\', '/');
-
-        _avatarUploadStatus = "Starting...";
-        _window.MarkDirty();
-        EnsureLuaState();
-
-        if (_luaDoString == null) { _avatarUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
-
-        // Synchronous errors propagate to C# via error() -> CallLua returns the message.
-        // Async handlers (server callbacks) use pcall + LuaSetStatus internally.
-        var setupErr = CallLua(
-            " if not (Z.EntityMgr).PlayerEnt then error('Need world: enter game first') end" +
-            " local stub=require('zservice/photograph_ntf_impl')" +
-            " local origRet=stub.RetAvatarToken" +
-            " local origGet=stub.GetPhotoTokenNtf" +
-            " local origUpR=stub.UploadPhotoResultNtf" +
-            " local origUpP=stub.UploadPictureResultNtf" +
-            " local origRev=stub.ReviewAvatarInfoNtf" +
-            " _G.__stlr_av_origRet=origRet _G.__stlr_av_origGet=origGet _G.__stlr_av_origUpR=origUpR _G.__stlr_av_origUpP=origUpP _G.__stlr_av_origRev=origRev" +
-            " stub.RetAvatarToken=function(self,call,vReq)" +
-            "  stub.RetAvatarToken=origRet stub.GetPhotoTokenNtf=origGet stub.UploadPhotoResultNtf=origUpR stub.UploadPictureResultNtf=origUpP stub.ReviewAvatarInfoNtf=origRev" +
-            "  local cbOk,cbErr=pcall(function()" +
-            "   if vReq.errCode~=0 then " + LuaSetStatus("'Token err:'..tostring(vReq.errCode)") + " return end" +
-            "   local r=vReq.result if not r then " + LuaSetStatus("'No result'") + " return end" +
-            "   " + LuaSetStatus("'Uploading...'") +
-            "   local up=(Z.UploadParm).New()" +
-            "   up.TmpSecretId=r.tmpSecretId up.TmpSecretKey=r.tmpSecretKey" +
-            "   up.Region=r.region up.TmpToken=r.tmpToken" +
-            "   up.ExpireTime=r.expiredTime up.Bucket=r.bucket up.SaveKey=r.objectKey" +
-            "   up.CallBackFunc=function(isOk)" +
-            "    if not isOk then " + LuaSetStatus("'COS failed'") + " return end" +
-            "    ;(Z.CoroUtil.create_coro_xpcall)(function()" +
-            "     local px=require('zproxy.photograph_proxy')" +
-            "     local cs=(Z.CancelSource).Rent()" +
-            "     local ret=px.UploadPhotoSuccessful({" +
-            "      charId=Z.ContainerMgr.CharSerialize.charBase.charId," +
-            "      pictureId=r.pictureId," +
-            "      funcType=(E.HttpTokenType).HeadProfile," +
-            "      data={{pictureUrl=r.objectKey,version=r.version,pictureType=(E.PictureType).EProfileSnapShot}}" +
-            "     },cs:CreateToken())" +
-            "     if ret and ret.errCode==0 then " + LuaSetStatus("'Done'") +
-            "     else " + LuaSetStatus("'Confirm err:'..(ret and tostring(ret.errCode) or '?')") + " end" +
-            "    end,function(e)" + LuaSetStatus("'Coro err:'..tostring(e)") + " end)()" +
-            "   end" +
-            "   local _pf=io.open('" + luaFilePath + "','rb')" +
-            "   if not _pf then " + LuaSetStatus("'No file " + luaFilePath + "'") + " return end" +
-            "   local _bytes=_pf:read('*a') _pf:close()" +
-            "   if not _bytes or #_bytes==0 then " + LuaSetStatus("'Empty file'") + " return end" +
-            "   " + LuaSetStatus("'Uploading '..(#_bytes)..'b...'") +
-            "   Z.UploadMgr:UploadPictureToCos(up,_bytes)" +
-            "  end)" +
-            "  if not cbOk then " + LuaSetStatus("'CB err:'..tostring(cbErr)") + " end" +
-            " end" +
-            " stub.GetPhotoTokenNtf=function(self,call,vReq) stub.GetPhotoTokenNtf=origGet " + LuaSetStatus("'NTF:GetPhotoTokenNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origGet,self,call,vReq) end" +
-            " stub.UploadPhotoResultNtf=function(self,call,vReq) stub.UploadPhotoResultNtf=origUpR " + LuaSetStatus("'NTF:UploadPhotoResultNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origUpR,self,call,vReq) end" +
-            " stub.UploadPictureResultNtf=function(self,call,vReq) stub.UploadPictureResultNtf=origUpP " + LuaSetStatus("'NTF:UploadPictureResultNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origUpP,self,call,vReq) end" +
-            " stub.ReviewAvatarInfoNtf=function(self,call,vReq) stub.ReviewAvatarInfoNtf=origRev " + LuaSetStatus("'NTF:ReviewAvatarInfoNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origRev,self,call,vReq) end" +
-            " local popupCls=require('ui.view.photo_personalzone_idcard_popup_view')" +
-            " local origSetHead=popupCls.setHeadImg _G.__stlr_av_origSetHead=origSetHead" +
-            " popupCls.setHeadImg=function(self)" +
-            "  pcall(function()" +
-            "   local rimg=((self.uiBinder).binder_head).rimg_portrait" +
-            "   rimg:AsyncLoadUrlImage('" + fileUrl + "',function() end)" +
-            "  end)" +
-            " end" +
-            " local cvm=Z.VMMgr.GetVM('camerasys')" +
-            " if not cvm then error('No camera VM') end" +
-            " local origGetToken=cvm.GetHeadOrBodyPhotoToken _G.__stlr_av_origGetToken=origGetToken" +
-            " cvm.GetHeadOrBodyPhotoToken=function(texId,snapType)" +
-            "  cvm.GetHeadOrBodyPhotoToken=origGetToken" +
-            "  popupCls.setHeadImg=origSetHead" +
-            "  " + LuaSetStatus("'Portrait confirm fired texId='..tostring(texId)..' snap='..tostring(snapType)") +
-            "  origGetToken(texId,snapType)" +
-            " end");
-
-        _services.Log.Info($"[CustomProfileImage] avatar setup: {(setupErr == null ? "ok" : setupErr)}");
-        if (setupErr != null)
-        {
-            var msg = setupErr;
-            var ci  = msg.LastIndexOf(": ");
-            if (ci >= 0 && ci < msg.Length - 2) msg = msg.Substring(ci + 2);
-            _avatarUploadStatus = msg;
-            _window.MarkDirty();
-            return;
-        }
-
-        _avatarUploadStatus = "Ready - Open your inventory and use the Avatar Change card and take any shot and the preview should appear";
-        _avatarHooksActive  = true;
-        _window.MarkDirty();
-    }
-
-    private void ClearAvatarHooks()
-    {
-        EnsureLuaState();
-        CallLua(
-            "pcall(function()" +
-            " local ok,stub=pcall(require,'zservice/photograph_ntf_impl')" +
-            " if ok and stub then" +
-            "  if _G.__stlr_av_origRet then stub.RetAvatarToken=_G.__stlr_av_origRet end" +
-            "  if _G.__stlr_av_origGet then stub.GetPhotoTokenNtf=_G.__stlr_av_origGet end" +
-            "  if _G.__stlr_av_origUpR then stub.UploadPhotoResultNtf=_G.__stlr_av_origUpR end" +
-            "  if _G.__stlr_av_origUpP then stub.UploadPictureResultNtf=_G.__stlr_av_origUpP end" +
-            "  if _G.__stlr_av_origRev then stub.ReviewAvatarInfoNtf=_G.__stlr_av_origRev end" +
-            " end" +
-            " local cvm=Z.VMMgr.GetVM('camerasys')" +
-            " if cvm and _G.__stlr_av_origGetToken then cvm.GetHeadOrBodyPhotoToken=_G.__stlr_av_origGetToken end" +
-            " local popupCls=require('ui.view.photo_personalzone_idcard_popup_view')" +
-            " if popupCls and _G.__stlr_av_origSetHead then popupCls.setHeadImg=_G.__stlr_av_origSetHead end" +
-            " _G.__stlr_av_origRet=nil _G.__stlr_av_origGet=nil _G.__stlr_av_origUpR=nil" +
-            " _G.__stlr_av_origUpP=nil _G.__stlr_av_origRev=nil" +
-            " _G.__stlr_av_origGetToken=nil _G.__stlr_av_origSetHead=nil _G.__stlr_av_status=nil" +
-            "end)");
-        _avatarHooksActive  = false;
-        _avatarUploadStatus = "Override cancelled";
-        _window.MarkDirty();
-    }
-
-    // ── Namecard upload ───────────────────────────────────────────────────────
-
-    private void ProcessNamecardUpload(string picked)
-    {
-        if (!System.IO.File.Exists(picked)) { _namecardUploadStatus = "File not found"; _window.MarkDirty(); return; }
-
-        var luaFilePath = picked.Replace(@"\", @"\\");
-        var fileUrl     = "file:///" + picked.Replace('\\', '/');
-
-        _namecardUploadStatus = "Starting...";
-        _window.MarkDirty();
-        EnsureLuaState();
-
-        if (_luaDoString == null) { _namecardUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
-
-        var setupErr = CallLua(
-            " if not (Z.EntityMgr).PlayerEnt then error('Need world: enter game first') end" +
-            " local stub=require('zservice/photograph_ntf_impl')" +
-            " local origRet=stub.RetAvatarToken" +
-            " local origGet=stub.GetPhotoTokenNtf" +
-            " local origUpR=stub.UploadPhotoResultNtf" +
-            " local origUpP=stub.UploadPictureResultNtf" +
-            " local origRev=stub.ReviewAvatarInfoNtf" +
-            " _G.__stlr_nc_origRet=origRet _G.__stlr_nc_origGet=origGet _G.__stlr_nc_origUpR=origUpR _G.__stlr_nc_origUpP=origUpP _G.__stlr_nc_origRev=origRev" +
-            " stub.RetAvatarToken=function(self,call,vReq)" +
-            "  stub.RetAvatarToken=origRet stub.GetPhotoTokenNtf=origGet stub.UploadPhotoResultNtf=origUpR stub.UploadPictureResultNtf=origUpP stub.ReviewAvatarInfoNtf=origRev" +
-            "  local cbOk,cbErr=pcall(function()" +
-            "   if vReq.errCode~=0 then " + LuaSetNcStatus("'Token err:'..tostring(vReq.errCode)") + " return end" +
-            "   local r=vReq.result if not r then " + LuaSetNcStatus("'No result'") + " return end" +
-            "   " + LuaSetNcStatus("'Uploading...'") +
-            "   local up=(Z.UploadParm).New()" +
-            "   up.TmpSecretId=r.tmpSecretId up.TmpSecretKey=r.tmpSecretKey" +
-            "   up.Region=r.region up.TmpToken=r.tmpToken" +
-            "   up.ExpireTime=r.expiredTime up.Bucket=r.bucket up.SaveKey=r.objectKey" +
-            "   up.CallBackFunc=function(isOk)" +
-            "    if not isOk then " + LuaSetNcStatus("'COS failed'") + " return end" +
-            "    ;(Z.CoroUtil.create_coro_xpcall)(function()" +
-            "     local px=require('zproxy.photograph_proxy')" +
-            "     local cs=(Z.CancelSource).Rent()" +
-            "     local ret=px.UploadPhotoSuccessful({" +
-            "      charId=Z.ContainerMgr.CharSerialize.charBase.charId," +
-            "      pictureId=r.pictureId," +
-            "      funcType=(E.HttpTokenType).HeadProfile," +
-            "      data={{pictureUrl=r.objectKey,version=r.version,pictureType=(E.PictureType).EProfileHalfBody}}" +
-            "     },cs:CreateToken())" +
-            "     if ret and ret.errCode==0 then " + LuaSetNcStatus("'Done'") +
-            "     else " + LuaSetNcStatus("'Confirm err:'..(ret and tostring(ret.errCode) or '?')") + " end" +
-            "    end,function(e)" + LuaSetNcStatus("'Coro err:'..tostring(e)") + " end)()" +
-            "   end" +
-            "   local _pf=io.open('" + luaFilePath + "','rb')" +
-            "   if not _pf then " + LuaSetNcStatus("'No file " + luaFilePath + "'") + " return end" +
-            "   local _bytes=_pf:read('*a') _pf:close()" +
-            "   if not _bytes or #_bytes==0 then " + LuaSetNcStatus("'Empty file'") + " return end" +
-            "   " + LuaSetNcStatus("'Uploading '..(#_bytes)..'b...'") +
-            "   Z.UploadMgr:UploadPictureToCos(up,_bytes)" +
-            "  end)" +
-            "  if not cbOk then " + LuaSetNcStatus("'CB err:'..tostring(cbErr)") + " end" +
-            " end" +
-            " stub.GetPhotoTokenNtf=function(self,call,vReq) stub.GetPhotoTokenNtf=origGet " + LuaSetNcStatus("'NTF:GetPhotoTokenNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origGet,self,call,vReq) end" +
-            " stub.UploadPhotoResultNtf=function(self,call,vReq) stub.UploadPhotoResultNtf=origUpR " + LuaSetNcStatus("'NTF:UploadPhotoResultNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origUpR,self,call,vReq) end" +
-            " stub.UploadPictureResultNtf=function(self,call,vReq) stub.UploadPictureResultNtf=origUpP " + LuaSetNcStatus("'NTF:UploadPictureResultNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origUpP,self,call,vReq) end" +
-            " stub.ReviewAvatarInfoNtf=function(self,call,vReq) stub.ReviewAvatarInfoNtf=origRev " + LuaSetNcStatus("'NTF:ReviewAvatarInfoNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origRev,self,call,vReq) end" +
-            " local idcardCls=require('ui.view.idcard_view')" +
-            " local origSetPhoto=idcardCls.setPhotoData _G.__stlr_nc_origSetPhoto=origSetPhoto" +
-            " idcardCls.setPhotoData=function(self)" +
-            "  pcall(function()" +
-            "   local bnd=(self.uiBinder)" +
-            "   local rimg=bnd.rimg_idcard_figure" +
-            "   bnd.Ref:SetVisible(rimg,true)" +
-            "   rimg:AsyncLoadUrlImage('" + fileUrl + "',function() end)" +
-            "  end)" +
-            " end" +
-            " local cvm=Z.VMMgr.GetVM('camerasys')" +
-            " if not cvm then error('No camera VM') end" +
-            " local origGetToken=cvm.GetHeadOrBodyPhotoToken _G.__stlr_nc_origGetToken=origGetToken" +
-            " cvm.GetHeadOrBodyPhotoToken=function(texId,snapType)" +
-            "  cvm.GetHeadOrBodyPhotoToken=origGetToken" +
-            "  idcardCls.setPhotoData=origSetPhoto" +
-            "  " + LuaSetNcStatus("'Namecard confirm fired texId='..tostring(texId)..' snap='..tostring(snapType)") +
-            "  origGetToken(texId,snapType)" +
-            " end");
-
-        _services.Log.Info($"[CustomProfileImage] namecard setup: {(setupErr == null ? "ok" : setupErr)}");
-        if (setupErr != null)
-        {
-            var msg = setupErr;
-            var ci  = msg.LastIndexOf(": ");
-            if (ci >= 0 && ci < msg.Length - 2) msg = msg.Substring(ci + 2);
-            _namecardUploadStatus = msg;
-            _window.MarkDirty();
-            return;
-        }
-
-        _namecardUploadStatus = "Ready - Open your inventory and use the Namecard Change card and take any shot and the preview should appear";
-        _namecardHooksActive  = true;
-        _window.MarkDirty();
-    }
-
-    private void ClearNamecardHooks()
-    {
-        EnsureLuaState();
-        CallLua(
-            "pcall(function()" +
-            " local ok,stub=pcall(require,'zservice/photograph_ntf_impl')" +
-            " if ok and stub then" +
-            "  if _G.__stlr_nc_origRet then stub.RetAvatarToken=_G.__stlr_nc_origRet end" +
-            "  if _G.__stlr_nc_origGet then stub.GetPhotoTokenNtf=_G.__stlr_nc_origGet end" +
-            "  if _G.__stlr_nc_origUpR then stub.UploadPhotoResultNtf=_G.__stlr_nc_origUpR end" +
-            "  if _G.__stlr_nc_origUpP then stub.UploadPictureResultNtf=_G.__stlr_nc_origUpP end" +
-            "  if _G.__stlr_nc_origRev then stub.ReviewAvatarInfoNtf=_G.__stlr_nc_origRev end" +
-            " end" +
-            " local cvm=Z.VMMgr.GetVM('camerasys')" +
-            " if cvm and _G.__stlr_nc_origGetToken then cvm.GetHeadOrBodyPhotoToken=_G.__stlr_nc_origGetToken end" +
-            " local ok2,idcardCls=pcall(require,'ui.view.idcard_view')" +
-            " if ok2 and idcardCls and _G.__stlr_nc_origSetPhoto then idcardCls.setPhotoData=_G.__stlr_nc_origSetPhoto end" +
-            " _G.__stlr_nc_origRet=nil _G.__stlr_nc_origGet=nil _G.__stlr_nc_origUpR=nil" +
-            " _G.__stlr_nc_origUpP=nil _G.__stlr_nc_origRev=nil" +
-            " _G.__stlr_nc_origGetToken=nil _G.__stlr_nc_origSetPhoto=nil _G.__stlr_nc_status=nil" +
-            "end)");
-        _namecardHooksActive  = false;
-        _namecardUploadStatus = "Override cancelled";
-        _window.MarkDirty();
     }
 
     // ── Icon ──────────────────────────────────────────────────────────────────
