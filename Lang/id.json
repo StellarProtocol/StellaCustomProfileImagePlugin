@@ -1,0 +1,21 @@
+{
+  "cpi.avatar": "Avatar",
+  "cpi.avatar.hint": "Disarankan: PNG persegi 300×300 px",
+  "cpi.avatar.make": "Jadikan Avatar",
+  "cpi.cancel": "Batal",
+  "cpi.chooseFile": "Pilih File…",
+  "cpi.dialog.filter": "Gambar PNG",
+  "cpi.dialog.title": "Pilih Gambar",
+  "cpi.namecard": "Kartu Nama",
+  "cpi.namecard.hint": "Disarankan: PNG potret 468×774 px",
+  "cpi.namecard.make": "Jadikan Kartu Nama",
+  "cpi.preview": "Pratinjau",
+  "cpi.preview.hint": "Pratinjau mungkin tidak mencerminkan hasil akhir. Periksa pratinjau dalam game untuk tampilan sebenarnya.",
+  "cpi.status.avatarReady": "Siap - Buka inventaris lalu gunakan kartu Ubah Avatar dan ambil bidikan apa pun, pratinjau akan muncul",
+  "cpi.status.cancelled": "Penggantian dibatalkan",
+  "cpi.status.fileNotFound": "File tidak ditemukan",
+  "cpi.status.luaNotReady": "Lua belum siap",
+  "cpi.status.namecardReady": "Siap - Buka inventaris lalu gunakan kartu Ubah Kartu Nama dan ambil bidikan apa pun, pratinjau akan muncul",
+  "cpi.status.starting": "Memulai...",
+  "cpi.title": "Gambar Profil Kustom"
+}

@@ -1,0 +1,21 @@
+{
+  "cpi.avatar": "รูปโปรไฟล์",
+  "cpi.avatar.hint": "แนะนำ: PNG สี่เหลี่ยมจัตุรัส 300×300 px",
+  "cpi.avatar.make": "ตั้งเป็นรูปโปรไฟล์",
+  "cpi.cancel": "ยกเลิก",
+  "cpi.chooseFile": "เลือกไฟล์…",
+  "cpi.dialog.filter": "ไฟล์ภาพ PNG",
+  "cpi.dialog.title": "เลือกรูปภาพ",
+  "cpi.namecard": "นามบัตร",
+  "cpi.namecard.hint": "แนะนำ: PNG แนวตั้ง 468×774 px",
+  "cpi.namecard.make": "ตั้งเป็นนามบัตร",
+  "cpi.preview": "ตัวอย่าง",
+  "cpi.preview.hint": "ตัวอย่างอาจไม่ตรงกับผลลัพธ์จริง โปรดตรวจสอบการแสดงผลจริงจากตัวอย่างในเกม",
+  "cpi.status.avatarReady": "พร้อมแล้ว - เปิดกระเป๋าแล้วใช้การ์ดเปลี่ยนรูปโปรไฟล์ ถ่ายภาพใดก็ได้ แล้วตัวอย่างจะปรากฏขึ้น",
+  "cpi.status.cancelled": "ยกเลิกการแทนที่แล้ว",
+  "cpi.status.fileNotFound": "ไม่พบไฟล์",
+  "cpi.status.luaNotReady": "Lua ยังไม่พร้อม",
+  "cpi.status.namecardReady": "พร้อมแล้ว - เปิดกระเป๋าแล้วใช้การ์ดเปลี่ยนนามบัตร ถ่ายภาพใดก็ได้ แล้วตัวอย่างจะปรากฏขึ้น",
+  "cpi.status.starting": "กำลังเริ่ม...",
+  "cpi.title": "รูปโปรไฟล์ที่กำหนดเอง"
+}

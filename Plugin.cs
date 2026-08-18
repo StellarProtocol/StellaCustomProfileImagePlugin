@@ -15,6 +15,7 @@ public sealed partial class Plugin : IStellarPlugin
     private const string HarmonyId = "stellar.customprofleimage-plugin";
 
     private readonly IPluginServices _services;
+    private readonly ILocalization   _loc;
     private          IWindowControl  _window = null!;
     private readonly IDisposable     _launcherEntry;
 
@@ -42,6 +43,7 @@ public sealed partial class Plugin : IStellarPlugin
     {
         _instance = this;
         _services = services;
+        _loc      = services.Localization;
 
         InstallLuaReadyTrigger();
         _services.Framework.Update += OnFrameworkUpdate;
@@ -49,7 +51,7 @@ public sealed partial class Plugin : IStellarPlugin
         _window = RegisterWindow();
 
         _launcherEntry = _services.Launcher.Register(new LauncherEntry(
-            Title:   "Custom Profile Image",
+            Title:   _loc.T("cpi.title"),
             IconPng: LoadIconPng(),
             IconKey: null,
             OnOpen:  () => _window.SetVisible(true))
@@ -70,7 +72,7 @@ public sealed partial class Plugin : IStellarPlugin
             new ButtonElement(
                 Label:   () => _selectedImagePath.Length > 0
                              ? System.IO.Path.GetFileName(_selectedImagePath)
-                             : "Choose File…",
+                             : _loc.T("cpi.chooseFile"),
                 OnClick: ChooseFile,
                 Enabled: () => !_dialogOpen,
                 Width:   270f),
@@ -79,18 +81,18 @@ public sealed partial class Plugin : IStellarPlugin
         elements.AddRange(new HudElement[]
         {
             new SeparatorElement(),
-            new TextElement(() => "Avatar", Emphasis: true),
-            new TextElement(() => "Recommended: 300×300 px square PNG",
+            new TextElement(() => _loc.T("cpi.avatar"), Emphasis: true),
+            new TextElement(() => _loc.T("cpi.avatar.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
             new RowElement(new HudElement[]
             {
                 new ButtonElement(
-                    Label:   () => "Make Avatar",
+                    Label:   () => _loc.T("cpi.avatar.make"),
                     OnClick: MakeAvatar,
                     Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
                     Width:   100f),
                 new ButtonElement(
-                    Label:   () => "Cancel",
+                    Label:   () => _loc.T("cpi.cancel"),
                     OnClick: ClearAvatarHooks,
                     Enabled: () => _avatarHooksActive,
                     Width:   100f),
@@ -100,18 +102,18 @@ public sealed partial class Plugin : IStellarPlugin
                 new TextElement(() => _avatarUploadStatus,
                                 Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
             new SeparatorElement(),
-            new TextElement(() => "Namecard", Emphasis: true),
-            new TextElement(() => "Recommended: 468×774 px portrait PNG",
+            new TextElement(() => _loc.T("cpi.namecard"), Emphasis: true),
+            new TextElement(() => _loc.T("cpi.namecard.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
             new RowElement(new HudElement[]
             {
                 new ButtonElement(
-                    Label:   () => "Make Namecard",
+                    Label:   () => _loc.T("cpi.namecard.make"),
                     OnClick: MakeNamecard,
                     Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
                     Width:   100f),
                 new ButtonElement(
-                    Label:   () => "Cancel",
+                    Label:   () => _loc.T("cpi.cancel"),
                     OnClick: ClearNamecardHooks,
                     Enabled: () => _namecardHooksActive,
                     Width:   100f),
@@ -125,9 +127,9 @@ public sealed partial class Plugin : IStellarPlugin
         if (capturedBytes != null)
         {
             elements.Add(new SeparatorElement());
-            elements.Add(new TextElement(() => "Preview", Emphasis: true));
+            elements.Add(new TextElement(() => _loc.T("cpi.preview"), Emphasis: true));
             elements.Add(new TextElement(
-                () => "Preview may not reflect the final result. Check the in-game preview for the actual appearance.",
+                () => _loc.T("cpi.preview.hint"),
                 Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted));
             elements.Add(new RowElement(new HudElement[]
             {
@@ -143,7 +145,7 @@ public sealed partial class Plugin : IStellarPlugin
         return _services.Windows.Register(new WindowRegistration(
             Spec: new WindowSpec(
                 Id:          "customprofleimage.main",
-                Title:       "Custom Profile Image",
+                Title:       _loc.T("cpi.title"),
                 DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 460f, 20f, 440f, 0f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
@@ -317,7 +319,7 @@ public sealed partial class Plugin : IStellarPlugin
         public int    FlagsEx;
     }
 
-    private void ShowDialogAsync(Action<string?> callback)
+    private void ShowDialogAsync(string title, string filter, Action<string?> callback)
     {
         // No hwndOwner: keeps the game window enabled so Unity's Lua tick keeps running.
         // MTA (default): avoids STA cross-apartment deadlock with the game's main thread.
@@ -328,7 +330,7 @@ public sealed partial class Plugin : IStellarPlugin
         var t = new System.Threading.Thread(() =>
         {
             string? result = null;
-            try { result = ShowOpenPngDialog(); }
+            try { result = ShowOpenPngDialog(title, filter); }
             catch (Exception ex) { _services.Log.Warning($"[CustomProfileImage] ShowOpenPngDialog threw: {ex.Message}"); }
             _services.Log.Info($"[CustomProfileImage] dialog result: {result ?? "null (cancelled or error)"}");
             if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
@@ -340,7 +342,7 @@ public sealed partial class Plugin : IStellarPlugin
         t.Start();
     }
 
-    private static string? ShowOpenPngDialog()
+    private static string? ShowOpenPngDialog(string title, string filter)
     {
         const int MaxPath = 520;
         var buf = Marshal.AllocHGlobal(MaxPath * 2);
@@ -350,11 +352,11 @@ public sealed partial class Plugin : IStellarPlugin
             var ofn = new OFN
             {
                 lStructSize  = Marshal.SizeOf<OFN>(),
-                lpstrFilter  = "PNG Images\0*.png\0",
+                lpstrFilter  = filter,
                 nFilterIndex = 1,
                 lpstrFile    = buf,
                 nMaxFile     = MaxPath,
-                lpstrTitle   = "Select Portrait Image",
+                lpstrTitle   = title,
                 lpstrDefExt  = "png",
                 Flags        = 0x00001000 | 0x00000800,
             };
@@ -369,7 +371,9 @@ public sealed partial class Plugin : IStellarPlugin
 
     private void ChooseFile()
     {
-        ShowDialogAsync(picked =>
+        var title  = _loc.T("cpi.dialog.title");
+        var filter = _loc.T("cpi.dialog.filter") + "\0*.png\0";
+        ShowDialogAsync(title, filter, picked =>
         {
             if (picked != null)
                 _pendingSelectedPath = picked;
