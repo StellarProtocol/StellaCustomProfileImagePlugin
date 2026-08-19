@@ -25,15 +25,15 @@ public sealed partial class Plugin
     //                        preview + GetToken armed so the user can retry the confirm.
     private void ProcessAvatarUpload(string picked)
     {
-        if (!System.IO.File.Exists(picked)) { _avatarUploadStatus = "File not found"; _window.MarkDirty(); return; }
+        if (!System.IO.File.Exists(picked)) { _avatarUploadStatus = _loc.T("cpi.status.fileNotFound"); _window.MarkDirty(); return; }
 
         var luaFilePath = picked.Replace(@"\", @"\\");
         var fileUrl     = "file:///" + picked.Replace('\\', '/');
 
-        _avatarUploadStatus = "Starting...";
+        _avatarUploadStatus = _loc.T("cpi.status.starting");
         _window.MarkDirty();
 
-        if (!_services.Lua.Ready) { _avatarUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
+        if (!_services.Lua.Ready) { _avatarUploadStatus = _loc.T("cpi.status.luaNotReady"); _window.MarkDirty(); return; }
 
         // Setup runs under pcall; a synchronous error() is parked in a status global and read back
         // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
@@ -122,7 +122,7 @@ public sealed partial class Plugin
             return;
         }
 
-        _avatarUploadStatus = "Ready - Open your inventory and use the Avatar Change card and take any shot and the preview should appear";
+        _avatarUploadStatus = _loc.T("cpi.status.avatarReady");
         _avatarHooksActive  = true;
         _window.MarkDirty();
     }
@@ -148,7 +148,7 @@ public sealed partial class Plugin
             " _G.__stlr_av_origGetToken=nil _G.__stlr_av_origSetHead=nil _G.__stlr_av_status=nil" +
             "end)");
         _avatarHooksActive  = false;
-        _avatarUploadStatus = "Override cancelled";
+        _avatarUploadStatus = _loc.T("cpi.status.cancelled");
         _window.MarkDirty();
     }
 }

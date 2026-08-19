@@ -17,15 +17,15 @@ public sealed partial class Plugin
     // idcard_view preview and pictureType EProfileHalfBody.
     private void ProcessNamecardUpload(string picked)
     {
-        if (!System.IO.File.Exists(picked)) { _namecardUploadStatus = "File not found"; _window.MarkDirty(); return; }
+        if (!System.IO.File.Exists(picked)) { _namecardUploadStatus = _loc.T("cpi.status.fileNotFound"); _window.MarkDirty(); return; }
 
         var luaFilePath = picked.Replace(@"\", @"\\");
         var fileUrl     = "file:///" + picked.Replace('\\', '/');
 
-        _namecardUploadStatus = "Starting...";
+        _namecardUploadStatus = _loc.T("cpi.status.starting");
         _window.MarkDirty();
 
-        if (!_services.Lua.Ready) { _namecardUploadStatus = "Lua not ready"; _window.MarkDirty(); return; }
+        if (!_services.Lua.Ready) { _namecardUploadStatus = _loc.T("cpi.status.luaNotReady"); _window.MarkDirty(); return; }
 
         // Setup runs under pcall; a synchronous error() is parked in a status global and read back
         // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
@@ -115,7 +115,7 @@ public sealed partial class Plugin
             return;
         }
 
-        _namecardUploadStatus = "Ready - Open your inventory and use the Namecard Change card and take any shot and the preview should appear";
+        _namecardUploadStatus = _loc.T("cpi.status.namecardReady");
         _namecardHooksActive  = true;
         _window.MarkDirty();
     }
@@ -141,7 +141,7 @@ public sealed partial class Plugin
             " _G.__stlr_nc_origGetToken=nil _G.__stlr_nc_origSetPhoto=nil _G.__stlr_nc_status=nil" +
             "end)");
         _namecardHooksActive  = false;
-        _namecardUploadStatus = "Override cancelled";
+        _namecardUploadStatus = _loc.T("cpi.status.cancelled");
         _window.MarkDirty();
     }
 }

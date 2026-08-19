@@ -1,0 +1,21 @@
+{
+  "cpi.avatar": "Avatar",
+  "cpi.avatar.hint": "Recommended: 300×300 px square PNG",
+  "cpi.avatar.make": "Make Avatar",
+  "cpi.cancel": "Cancel",
+  "cpi.chooseFile": "Choose File…",
+  "cpi.dialog.filter": "PNG Images",
+  "cpi.dialog.title": "Select Portrait Image",
+  "cpi.namecard": "Namecard",
+  "cpi.namecard.hint": "Recommended: 468×774 px portrait PNG",
+  "cpi.namecard.make": "Make Namecard",
+  "cpi.preview": "Preview",
+  "cpi.preview.hint": "Preview may not reflect the final result. Check the in-game preview for the actual appearance.",
+  "cpi.status.avatarReady": "Ready - Open your inventory and use the Avatar Change card and take any shot and the preview should appear",
+  "cpi.status.cancelled": "Override cancelled",
+  "cpi.status.fileNotFound": "File not found",
+  "cpi.status.luaNotReady": "Lua not ready",
+  "cpi.status.namecardReady": "Ready - Open your inventory and use the Namecard Change card and take any shot and the preview should appear",
+  "cpi.status.starting": "Starting...",
+  "cpi.title": "Custom Profile Image"
+}
