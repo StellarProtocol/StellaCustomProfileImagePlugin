@@ -27,6 +27,7 @@
     <EmbeddedResource Include="Lang/ja.json" LogicalName="Stellar.CustomProfleImage.Lang.ja.json" />
     <EmbeddedResource Include="Lang/th.json" LogicalName="Stellar.CustomProfleImage.Lang.th.json" />
     <EmbeddedResource Include="Lang/id.json" LogicalName="Stellar.CustomProfleImage.Lang.id.json" />
+    <EmbeddedResource Include="Lang/fil.json" LogicalName="Stellar.CustomProfleImage.Lang.fil.json" />
   </ItemGroup>
 
   <ItemGroup>
