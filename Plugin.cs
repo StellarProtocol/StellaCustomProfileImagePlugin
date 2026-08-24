@@ -56,6 +56,8 @@ public sealed partial class Plugin : IStellarPlugin
             IconKey: null,
             OnOpen:  () => _window.SetVisible(true))
         { Group = LauncherGroup.Plugin,
+          // Re-localize the tile title live on a language change (Title alone is a captured string).
+          TitleProvider = () => _loc.T("cpi.title"),
           ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
 
         _services.Log.Info("[CustomProfileImage] constructed");
