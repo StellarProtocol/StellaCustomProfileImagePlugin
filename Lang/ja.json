@@ -18,6 +18,5 @@
   "cpi.status.namecardReady": "準備完了 - インベントリを開いてネームカード変更カードを使い、任意の撮影を行うとプレビューが表示されます",
   "cpi.status.stageCopyFailed": "ステージングコピー失敗: ",
   "cpi.status.starting": "開始中...",
-  "cpi.testFileRead": "ファイル読み込みテスト",
   "cpi.title": "カスタムプロフィール画像"
 }

@@ -27,8 +27,6 @@ public sealed partial class Plugin : IStellarPlugin
     private string _namecardUploadStatus = "";
     private bool   _namecardHooksActive  = false;
 
-    private string _diagStatus           = "";
-
     private string           _selectedImagePath   = "";
     private byte[]?          _previewPngBytes     = null;
     private int              _previewHeight       = 200;
@@ -80,15 +78,6 @@ public sealed partial class Plugin : IStellarPlugin
                 OnClick: ChooseFile,
                 Enabled: () => !_dialogOpen,
                 Width:   270f),
-            new ButtonElement(
-                Label:   () => _loc.T("cpi.testFileRead"),
-                OnClick: TestFileRead,
-                Enabled: () => !_dialogOpen,
-                Width:   270f),
-            new ConditionalElement(
-                () => _diagStatus.Length > 0,
-                new TextElement(() => _diagStatus,
-                                Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
         };
 
         elements.AddRange(new HudElement[]
