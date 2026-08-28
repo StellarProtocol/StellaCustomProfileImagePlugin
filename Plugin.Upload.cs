@@ -64,10 +64,19 @@ public sealed partial class Plugin
 
         if (!_services.Lua.Ready) { _uploadStatus = _loc.T("cpi.status.luaNotReady"); _window.MarkDirty(); return; }
 
-        // Hand the image bytes to Lua as a base64 global in its OWN DoString, keeping the bulk data out of
-        // the hook-arming string below. Base64's alphabet (A–Z a–z 0–9 + / =) has no ' or \, so the
-        // single-quoted Lua literal needs no escaping. Decoded on confirm by __stlr_up_b64dec.
-        _services.Lua.DoString("_G.__stlr_up_b64='" + b64 + "'");
+        // Hand the image bytes to Lua as a base64 global, keeping the bulk data out of the hook-arming
+        // string below. Base64's alphabet (A–Z a–z 0–9 + / =) has no ' or \, so the single-quoted Lua
+        // literal needs no escaping. Decoded on confirm by __stlr_up_b64dec.
+        //
+        // Inject in CHUNKS, not one giant literal: a single ~817KB DoString silently FAILS (the global is
+        // left nil — confirmed live), while small DoStrings succeed. All base64 chars are single-byte ASCII
+        // so chunk boundaries can fall anywhere, and the alphabet has no ' or \ so no chunk needs escaping.
+        _services.Lua.DoString("_G.__stlr_up_b64=''");
+        for (int off = 0; off < b64.Length; off += 4000)
+        {
+            var chunk = b64.Substring(off, System.Math.Min(4000, b64.Length - off));
+            _services.Lua.DoString("_G.__stlr_up_b64=_G.__stlr_up_b64..'" + chunk + "'");
+        }
 
         // Verify the ~817KB single-DoString injection actually landed — an oversized DoString can silently
         // fail to set the global, leaving the decoder with no bytes. Read the stored length back: if `got`
