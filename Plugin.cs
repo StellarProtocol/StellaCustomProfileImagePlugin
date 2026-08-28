@@ -108,12 +108,14 @@ public sealed partial class Plugin : IStellarPlugin
                     Label:   () => _loc.T("cpi.apply"),
                     OnClick: ApplyUpload,
                     Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
-                    Width:   100f),
+                    // Wide enough for the longest localized label on ONE line:
+                    // CJK ja "アバター／ネームカードを作成" (14 full-width glyphs) is the constraint.
+                    Width:   280f),
                 new ButtonElement(
                     Label:   () => _loc.T("cpi.cancel"),
                     OnClick: ClearHooks,
                     Enabled: () => _hooksActive,
-                    Width:   100f),
+                    Width:   95f),
             }, Gap: 8f),
             new ConditionalElement(
                 () => _uploadStatus.Length > 0,
@@ -143,7 +145,7 @@ public sealed partial class Plugin : IStellarPlugin
             Spec: new WindowSpec(
                 Id:          "customprofleimage.main",
                 Title:       _loc.T("cpi.title"),
-                DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 460f, 20f, 440f, 0f),
+                DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 520f, 20f, 500f, 0f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
             { Draggable = true, Closable = true, StartVisible = false,
