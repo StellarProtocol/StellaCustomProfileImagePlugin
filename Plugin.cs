@@ -310,8 +310,10 @@ public sealed partial class Plugin : IStellarPlugin
 
     // ── Lua global helpers ────────────────────────────────────────────────────
 
+    // rawset bypasses the game's strict-global __newindex guard, which rejects undeclared-global writes
+    // (a plain `_G.__stlr_up_status=...` is silently blocked, leaving the value nil).
     private static string LuaSetStatus(string luaValueExpr) =>
-        $"_G.__stlr_up_status=({luaValueExpr})";
+        $"rawset(_G,'__stlr_up_status',({luaValueExpr}))";
 
     // ── Windows dialog + focus helpers ────────────────────────────────────────
 

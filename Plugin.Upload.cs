@@ -83,7 +83,7 @@ public sealed partial class Plugin
         // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
         // Async handlers (server callbacks) use pcall + LuaSetStatus internally.
         _services.Lua.DoString(
-            "_G.__stlr_up_setup=nil local _stlrOk,_stlrErr=pcall(function()" +
+            "rawset(_G,'__stlr_up_setup',nil) local _stlrOk,_stlrErr=pcall(function()" +
             " if not (Z.EntityMgr).PlayerEnt then error('Need world: enter game first') end" +
             " local stub=require('zservice/photograph_ntf_impl')" +
             " local origRet=stub.RetAvatarToken" +
@@ -91,10 +91,10 @@ public sealed partial class Plugin
             " local origUpR=stub.UploadPhotoResultNtf" +
             " local origUpP=stub.UploadPictureResultNtf" +
             " local origRev=stub.ReviewAvatarInfoNtf" +
-            " _G.__stlr_up_origRet=origRet _G.__stlr_up_origGet=origGet _G.__stlr_up_origUpR=origUpR _G.__stlr_up_origUpP=origUpP _G.__stlr_up_origRev=origRev" +
+            " rawset(_G,'__stlr_up_origRet',origRet) rawset(_G,'__stlr_up_origGet',origGet) rawset(_G,'__stlr_up_origUpR',origUpR) rawset(_G,'__stlr_up_origUpP',origUpP) rawset(_G,'__stlr_up_origRev',origRev)" +
             // Avatar preview hook (setHeadImg fires on popup open — armed from Apply, stays armed).
             " local popupCls=require('ui.view.photo_personalzone_idcard_popup_view')" +
-            " local origSetHead=popupCls.setHeadImg _G.__stlr_up_origSetHead=origSetHead" +
+            " local origSetHead=popupCls.setHeadImg rawset(_G,'__stlr_up_origSetHead',origSetHead)" +
             " popupCls.setHeadImg=function(self)" +
             "  pcall(function()" +
             "   local rimg=((self.uiBinder).binder_head).rimg_portrait" +
@@ -103,7 +103,7 @@ public sealed partial class Plugin
             " end" +
             // Namecard preview hook (setPhotoData — different view class, no conflict with setHeadImg).
             " local idcardCls=require('ui.view.idcard_view')" +
-            " local origSetPhoto=idcardCls.setPhotoData _G.__stlr_up_origSetPhoto=origSetPhoto" +
+            " local origSetPhoto=idcardCls.setPhotoData rawset(_G,'__stlr_up_origSetPhoto',origSetPhoto)" +
             " idcardCls.setPhotoData=function(self)" +
             "  pcall(function()" +
             "   local bnd=(self.uiBinder)" +
@@ -114,7 +114,7 @@ public sealed partial class Plugin
             " end" +
             " local cvm=Z.VMMgr.GetVM('camerasys')" +
             " if not cvm then error('No camera VM') end" +
-            " local origGetToken=cvm.GetHeadOrBodyPhotoToken _G.__stlr_up_origGetToken=origGetToken" +
+            " local origGetToken=cvm.GetHeadOrBodyPhotoToken rawset(_G,'__stlr_up_origGetToken',origGetToken)" +
             " cvm.GetHeadOrBodyPhotoToken=function(texId,snapType)" +
             // Confirm fired: install the uploader NOW, scoped to this confirm's token. pictureType is
             // snapType (head→EProfileSnapShot / halfbody→EProfileHalfBody) — auto-detects card type.
@@ -144,7 +144,7 @@ public sealed partial class Plugin
             // Success: fully disarm every hook and nil the origin globals (Cancel becomes a no-op).
             "       stub.RetAvatarToken=origRet stub.GetPhotoTokenNtf=origGet stub.UploadPhotoResultNtf=origUpR stub.UploadPictureResultNtf=origUpP stub.ReviewAvatarInfoNtf=origRev" +
             "       popupCls.setHeadImg=origSetHead idcardCls.setPhotoData=origSetPhoto cvm.GetHeadOrBodyPhotoToken=origGetToken" +
-            "       _G.__stlr_up_origRet=nil _G.__stlr_up_origGet=nil _G.__stlr_up_origUpR=nil _G.__stlr_up_origUpP=nil _G.__stlr_up_origRev=nil _G.__stlr_up_origGetToken=nil _G.__stlr_up_origSetHead=nil _G.__stlr_up_origSetPhoto=nil _G.__stlr_up_bytes=nil" +
+            "       rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil) rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil) rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil) rawset(_G,'__stlr_up_bytes',nil)" +
             "      else " + LuaSetStatus("'Confirm err:'..(ret and tostring(ret.errCode) or '?')") + " logError('[STLR] confirm err '..(ret and tostring(ret.errCode) or '?'))" + " stub.RetAvatarToken=origRet end" +
             "     end,function(e)" + LuaSetStatus("'Coro err:'..tostring(e)") + " end)()" +
             "    end" +
@@ -167,7 +167,7 @@ public sealed partial class Plugin
             "  origGetToken(texId,snapType)" +
             " end" +
             " end)" +
-            " if not _stlrOk then _G.__stlr_up_setup=tostring(_stlrErr) end");
+            " if not _stlrOk then rawset(_G,'__stlr_up_setup',tostring(_stlrErr)) end");
         var setupErr = _services.Lua.ReadGlobalString("__stlr_up_setup");
 
         _services.Log.Info($"[CustomProfileImage] upload setup: {(setupErr == null ? "ok" : setupErr)}");
@@ -205,10 +205,10 @@ public sealed partial class Plugin
             " if ok1 and popupCls and _G.__stlr_up_origSetHead then popupCls.setHeadImg=_G.__stlr_up_origSetHead end" +
             " local ok2,idcardCls=pcall(require,'ui.view.idcard_view')" +
             " if ok2 and idcardCls and _G.__stlr_up_origSetPhoto then idcardCls.setPhotoData=_G.__stlr_up_origSetPhoto end" +
-            " _G.__stlr_up_origRet=nil _G.__stlr_up_origGet=nil _G.__stlr_up_origUpR=nil" +
-            " _G.__stlr_up_origUpP=nil _G.__stlr_up_origRev=nil" +
-            " _G.__stlr_up_origGetToken=nil _G.__stlr_up_origSetHead=nil _G.__stlr_up_origSetPhoto=nil _G.__stlr_up_status=nil" +
-            " _G.__stlr_up_bytes=nil" +
+            " rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil)" +
+            " rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil)" +
+            " rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil) rawset(_G,'__stlr_up_status',nil)" +
+            " rawset(_G,'__stlr_up_bytes',nil)" +
             "end)");
         _hooksActive   = false;
         _lastLuaStatus = null;
@@ -317,16 +317,31 @@ public sealed partial class Plugin
                 return false;
             }
 
-            // lua_setglobal(IntPtr, string) pops the top-of-stack value into _G[name]. string marshals
-            // reliably, so an exact-signature GetMethod is fine here.
-            var setGlobal = luaDllType.GetMethod("lua_setglobal",
+            // The game protects _G with a strict-global metatable (__newindex rejects any UNDECLARED
+            // global write with "Attempt to write to undeclared global variable: ..."), so lua_setglobal
+            // is silently blocked and the value stays nil. rawset(_G, key, value) bypasses __newindex —
+            // so instead of pushing the value + lua_setglobal, we call rawset via the C API:
+            //   getglobal 'rawset'; getglobal '_G'; pushstring key; pushlstring bytes; pcall(3,0,0).
+            // string marshals reliably, so exact-signature GetMethod is fine for these three.
+            var getGlobal = luaDllType.GetMethod("lua_getglobal",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, null,
                 new[] { typeof(System.IntPtr), typeof(string) }, null);
-            if (setGlobal == null)
+            var pushString = luaDllType.GetMethod("lua_pushstring",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, null,
+                new[] { typeof(System.IntPtr), typeof(string) }, null);
+            var pcall = luaDllType.GetMethod("lua_pcall",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, null,
+                new[] { typeof(System.IntPtr), typeof(int), typeof(int), typeof(int) }, null);
+            if (getGlobal == null || pushString == null || pcall == null)
             {
-                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: lua_setglobal(IntPtr,string) not found");
+                _services.Log.Warning($"[CustomProfileImage] PushBytesToLuaGlobal: rawset C-API methods not found " +
+                    $"(getglobal={getGlobal != null}, pushstring={pushString != null}, pcall={pcall != null})");
                 return false;
             }
+            // Optional — only for a richer error message on pcall failure; not required for the push.
+            var toString = luaDllType.GetMethod("lua_tostring",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, null,
+                new[] { typeof(System.IntPtr), typeof(int) }, null);
 
             // Coerce the managed byte[] to whatever the array param actually is. If it already accepts a
             // managed byte[], pass it straight through; otherwise build the interop array (Il2CppStructArray
@@ -363,11 +378,21 @@ public sealed partial class Plugin
                 }
             }
 
-            // Push the exact bytes, then pop them into the named global.
-            pushMethod.Invoke(null, new object[] { L, byteArg, bytes.Length });
-            setGlobal.Invoke(null, new object[] { L, globalName });
+            // rawset(_G, globalName, bytes) via the C API — bypasses the strict-global __newindex guard.
+            getGlobal.Invoke(null, new object[] { L, "rawset" });       // push the rawset function
+            getGlobal.Invoke(null, new object[] { L, "_G" });          // push the globals table
+            pushString.Invoke(null, new object[] { L, globalName });   // push key
+            pushMethod.Invoke(null, new object[] { L, byteArg, bytes.Length }); // push value (exact bytes)
+            int rc = (int)pcall.Invoke(null, new object[] { L, 3, 0, 0 })!;
+            if (rc != 0)
+            {
+                var err = toString?.Invoke(null, new object[] { L, -1 }) as string;
+                _services.Log.Warning($"[CustomProfileImage] PushBytesToLuaGlobal: rawset pcall failed rc={rc}" +
+                    (err != null ? $" ({err})" : ""));
+                return false;
+            }
 
-            _services.Log.Info($"[CustomProfileImage] pushed {bytes.Length} bytes to _G.{globalName}");
+            _services.Log.Info($"[CustomProfileImage] pushed {bytes.Length} bytes to _G.{globalName} (rawset rc=0)");
             return true;
         }
         catch (System.Exception ex)
