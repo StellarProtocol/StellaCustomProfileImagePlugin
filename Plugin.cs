@@ -240,21 +240,33 @@ public sealed partial class Plugin : IStellarPlugin
         }
 
         // Mirror the Lua-side upload status into the window + log while hooks are armed. The uploader
-        // parks its progress/error strings in _G.__stlr_up_status (via LuaSetStatus) but nothing reads
-        // them back, so confirm/upload failures were invisible. One ReadGlobalString per frame, only
-        // while active. Null/absent means "no new status" — leave the C#-set Ready/error text alone.
+        // parks a stable CODE in _G.__stlr_up_status (via LuaSetStatus) — Lua can't call _loc.T, so it
+        // parks 'uploading'/'done'/'error' and we map the code to a localized string here. The specific
+        // technical cause stays in the Lua logError traces (Player.log), out of the user's window. One
+        // ReadGlobalString per frame, only while active. Change-detection runs on the RAW code so a
+        // repeated code doesn't re-fire. Null/absent means "no new status" — leave the C#-set text alone.
         if (_hooksActive)
         {
             var luaStatus = _services.Lua.ReadGlobalString("__stlr_up_status");
             if (luaStatus != null && luaStatus != _lastLuaStatus)
             {
                 _lastLuaStatus = luaStatus;
-                _uploadStatus  = luaStatus;
+                _uploadStatus  = MapLuaStatus(luaStatus);
                 _window.MarkDirty();
                 _services.Log.Info($"[CustomProfileImage] lua-status: {luaStatus}");
             }
         }
     }
+
+    // Map the stable status CODE the Lua uploader parks to a localized, user-friendly string. Unknown or
+    // legacy values fall through to the raw string so nothing is silently swallowed.
+    private string MapLuaStatus(string code) => code switch
+    {
+        "uploading" => _loc.T("cpi.status.uploading"),
+        "done"      => _loc.T("cpi.status.done"),
+        "error"     => _loc.T("cpi.status.uploadFailed"),
+        _           => code,
+    };
 
     private void LoadPreview(string path)
     {

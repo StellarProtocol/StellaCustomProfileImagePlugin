@@ -17,10 +17,13 @@
   "cpi.preview.hint": "Preview may not reflect the final result. Check the in-game preview for the actual appearance.",
   "cpi.recommendedSize": "Recommended Image Size",
   "cpi.status.cancelled": "Override cancelled",
+  "cpi.status.done": "Upload complete!",
   "cpi.status.emptyFile": "The selected file is empty",
   "cpi.status.fileNotFound": "File not found",
   "cpi.status.luaNotReady": "Lua not ready",
   "cpi.status.ready": "Ready — now use your Avatar/Namecard ticket or the guild change device, then take a shot.",
   "cpi.status.starting": "Starting...",
+  "cpi.status.uploadFailed": "Upload failed. Please try again.",
+  "cpi.status.uploading": "Uploading…",
   "cpi.title": "Custom Profile Image"
 }

@@ -17,10 +17,13 @@
   "cpi.preview.hint": "ตัวอย่างอาจไม่ตรงกับผลลัพธ์จริง โปรดตรวจสอบการแสดงผลจริงจากตัวอย่างในเกม",
   "cpi.recommendedSize": "ขนาดภาพที่แนะนำ",
   "cpi.status.cancelled": "ยกเลิกการแทนที่แล้ว",
+  "cpi.status.done": "อัปโหลดสำเร็จ!",
   "cpi.status.emptyFile": "ไฟล์ที่เลือกว่างเปล่า",
   "cpi.status.fileNotFound": "ไม่พบไฟล์",
   "cpi.status.luaNotReady": "Lua ยังไม่พร้อม",
   "cpi.status.ready": "พร้อมแล้ว — ตอนนี้ใช้การ์ดเปลี่ยนรูปโปรไฟล์/นามบัตรหรืออุปกรณ์เปลี่ยนของกิลด์ แล้วถ่ายภาพ",
   "cpi.status.starting": "กำลังเริ่ม...",
+  "cpi.status.uploadFailed": "อัปโหลดไม่สำเร็จ กรุณาลองอีกครั้ง",
+  "cpi.status.uploading": "กำลังอัปโหลด…",
   "cpi.title": "รูปโปรไฟล์ที่กำหนดเอง"
 }

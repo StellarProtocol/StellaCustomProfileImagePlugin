@@ -17,10 +17,13 @@
   "cpi.preview.hint": "Pratinjau mungkin tidak mencerminkan hasil akhir. Periksa pratinjau dalam game untuk tampilan sebenarnya.",
   "cpi.recommendedSize": "Ukuran Gambar yang Disarankan",
   "cpi.status.cancelled": "Penggantian dibatalkan",
+  "cpi.status.done": "Unggahan selesai!",
   "cpi.status.emptyFile": "File yang dipilih kosong",
   "cpi.status.fileNotFound": "File tidak ditemukan",
   "cpi.status.luaNotReady": "Lua belum siap",
   "cpi.status.ready": "Siap — sekarang gunakan tiket Avatar/Kartu Nama atau perangkat pengubah guild, lalu ambil bidikan.",
   "cpi.status.starting": "Memulai...",
+  "cpi.status.uploadFailed": "Unggahan gagal. Silakan coba lagi.",
+  "cpi.status.uploading": "Mengunggah…",
   "cpi.title": "Gambar Profil Kustom"
 }

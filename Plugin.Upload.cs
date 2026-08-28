@@ -70,7 +70,7 @@ public sealed partial class Plugin
         // Lua string as-is. Must run BEFORE the setup DoString so the global exists when confirm reads it.
         if (!PushBytesToLuaGlobal(bytes, "__stlr_up_bytes"))
         {
-            _uploadStatus = "Byte push failed";
+            _uploadStatus = _loc.T("cpi.status.uploadFailed");
             _window.MarkDirty();
             return;
         }
@@ -121,16 +121,16 @@ public sealed partial class Plugin
             "  stub.RetAvatarToken=function(self,call,vReq)" +
             "   local cbOk,cbErr=pcall(function()" +
             "    logError('[STLR] uploader fired bytes='..tostring(_G.__stlr_up_bytes and #_G.__stlr_up_bytes or 'nil'))" +
-            "    if vReq.errCode~=0 then " + LuaSetStatus("'Token err:'..tostring(vReq.errCode)") + " stub.RetAvatarToken=origRet return end" +
-            "    local r=vReq.result if not r then " + LuaSetStatus("'No result'") + " stub.RetAvatarToken=origRet return end" +
-            "    " + LuaSetStatus("'Uploading...'") +
+            "    if vReq.errCode~=0 then " + LuaSetStatus("'error'") + " logError('[STLR] token err '..tostring(vReq.errCode)) stub.RetAvatarToken=origRet return end" +
+            "    local r=vReq.result if not r then " + LuaSetStatus("'error'") + " logError('[STLR] no result') stub.RetAvatarToken=origRet return end" +
+            "    " + LuaSetStatus("'uploading'") +
             "    local up=(Z.UploadParm).New()" +
             "    up.TmpSecretId=r.tmpSecretId up.TmpSecretKey=r.tmpSecretKey" +
             "    up.Region=r.region up.TmpToken=r.tmpToken" +
             "    up.ExpireTime=r.expiredTime up.Bucket=r.bucket up.SaveKey=r.objectKey" +
             "    up.CallBackFunc=function(isOk)" +
             "     logError('[STLR] cos isOk='..tostring(isOk))" +
-            "     if not isOk then " + LuaSetStatus("'COS failed'") + " stub.RetAvatarToken=origRet return end" +
+            "     if not isOk then " + LuaSetStatus("'error'") + " logError('[STLR] cos failed') stub.RetAvatarToken=origRet return end" +
             "     ;(Z.CoroUtil.create_coro_xpcall)(function()" +
             "      local px=require('zproxy.photograph_proxy')" +
             "      local cs=(Z.CancelSource).Rent()" +
@@ -140,28 +140,28 @@ public sealed partial class Plugin
             "       funcType=(E.HttpTokenType).HeadProfile," +
             "       data={{pictureUrl=r.objectKey,version=r.version,pictureType=snapType}}" +
             "      },cs:CreateToken())" +
-            "      if ret and ret.errCode==0 then " + LuaSetStatus("'Done'") + " logError('[STLR] upload done')" +
+            "      if ret and ret.errCode==0 then " + LuaSetStatus("'done'") + " logError('[STLR] upload done')" +
             // Success: fully disarm every hook and nil the origin globals (Cancel becomes a no-op).
             "       stub.RetAvatarToken=origRet stub.GetPhotoTokenNtf=origGet stub.UploadPhotoResultNtf=origUpR stub.UploadPictureResultNtf=origUpP stub.ReviewAvatarInfoNtf=origRev" +
             "       popupCls.setHeadImg=origSetHead idcardCls.setPhotoData=origSetPhoto cvm.GetHeadOrBodyPhotoToken=origGetToken" +
             "       rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil) rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil) rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil) rawset(_G,'__stlr_up_bytes',nil)" +
-            "      else " + LuaSetStatus("'Confirm err:'..(ret and tostring(ret.errCode) or '?')") + " logError('[STLR] confirm err '..(ret and tostring(ret.errCode) or '?'))" + " stub.RetAvatarToken=origRet end" +
-            "     end,function(e)" + LuaSetStatus("'Coro err:'..tostring(e)") + " end)()" +
+            "      else " + LuaSetStatus("'error'") + " logError('[STLR] confirm err '..(ret and tostring(ret.errCode) or '?'))" + " stub.RetAvatarToken=origRet end" +
+            "     end,function(e)" + LuaSetStatus("'error'") + " logError('[STLR] coro err '..tostring(e)) end)()" +
             "    end" +
             "    local _bytes=_G.__stlr_up_bytes" +
-            "    if not _bytes or #_bytes==0 then " + LuaSetStatus("'No image bytes'") + " stub.RetAvatarToken=origRet return end" +
-            "    " + LuaSetStatus("'Uploading '..(#_bytes)..'b...'") +
+            "    if not _bytes or #_bytes==0 then " + LuaSetStatus("'error'") + " logError('[STLR] no image bytes') stub.RetAvatarToken=origRet return end" +
+            "    " + LuaSetStatus("'uploading'") +
             "    logError('[STLR] calling UploadPictureToCos '..(#_bytes)..'b')" +
             "    Z.UploadMgr:UploadPictureToCos(up,_bytes)" +
             "   end)" +
-            "   if not cbOk then " + LuaSetStatus("'CB err:'..tostring(cbErr)") + " stub.RetAvatarToken=origRet end" +
+            "   if not cbOk then " + LuaSetStatus("'error'") + " logError('[STLR] cb err '..tostring(cbErr)) stub.RetAvatarToken=origRet end" +
             "  end" +
             // Diagnostic NTF taps (self-restore on fire, only park status strings).
-            "  stub.GetPhotoTokenNtf=function(self,call,vReq) stub.GetPhotoTokenNtf=origGet " + LuaSetStatus("'NTF:GetPhotoTokenNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origGet,self,call,vReq) end" +
-            "  stub.UploadPhotoResultNtf=function(self,call,vReq) stub.UploadPhotoResultNtf=origUpR " + LuaSetStatus("'NTF:UploadPhotoResultNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origUpR,self,call,vReq) end" +
-            "  stub.UploadPictureResultNtf=function(self,call,vReq) stub.UploadPictureResultNtf=origUpP " + LuaSetStatus("'NTF:UploadPictureResultNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origUpP,self,call,vReq) end" +
-            "  stub.ReviewAvatarInfoNtf=function(self,call,vReq) stub.ReviewAvatarInfoNtf=origRev " + LuaSetStatus("'NTF:ReviewAvatarInfoNtf ec='..tostring(vReq and vReq.errCode)") + " pcall(origRev,self,call,vReq) end" +
-            "  " + LuaSetStatus("'Confirm fired texId='..tostring(texId)..' snap='..tostring(snapType)") +
+            "  stub.GetPhotoTokenNtf=function(self,call,vReq) stub.GetPhotoTokenNtf=origGet logError('[STLR] ntf GetPhotoTokenNtf ec='..tostring(vReq and vReq.errCode)) pcall(origGet,self,call,vReq) end" +
+            "  stub.UploadPhotoResultNtf=function(self,call,vReq) stub.UploadPhotoResultNtf=origUpR logError('[STLR] ntf UploadPhotoResultNtf ec='..tostring(vReq and vReq.errCode)) pcall(origUpR,self,call,vReq) end" +
+            "  stub.UploadPictureResultNtf=function(self,call,vReq) stub.UploadPictureResultNtf=origUpP logError('[STLR] ntf UploadPictureResultNtf ec='..tostring(vReq and vReq.errCode)) pcall(origUpP,self,call,vReq) end" +
+            "  stub.ReviewAvatarInfoNtf=function(self,call,vReq) stub.ReviewAvatarInfoNtf=origRev logError('[STLR] ntf ReviewAvatarInfoNtf ec='..tostring(vReq and vReq.errCode)) pcall(origRev,self,call,vReq) end" +
+            "  " + LuaSetStatus("'uploading'") +
             "  logError('[STLR] confirm fired snap='..tostring(snapType))" +
             // Do NOT restore previews/GetToken here — keep them armed for retry.
             "  origGetToken(texId,snapType)" +

@@ -17,10 +17,13 @@
   "cpi.preview.hint": "Maaaring hindi ipakita ng preview ang huling resulta. Tingnan ang in-game na preview para sa aktwal na anyo.",
   "cpi.recommendedSize": "Inirerekomendang Sukat ng Larawan",
   "cpi.status.cancelled": "Kinansela ang override",
+  "cpi.status.done": "Tapos na ang upload!",
   "cpi.status.emptyFile": "Walang laman ang napiling file",
   "cpi.status.fileNotFound": "Hindi nahanap ang file",
   "cpi.status.luaNotReady": "Hindi pa handa ang Lua",
   "cpi.status.ready": "Handa na — gamitin na ngayon ang iyong Avatar/Namecard ticket o ang change device ng guild, pagkatapos ay kumuha ng shot.",
   "cpi.status.starting": "Nagsisimula...",
+  "cpi.status.uploadFailed": "Nabigo ang pag-upload. Pakisubukan muli.",
+  "cpi.status.uploading": "Ina-upload…",
   "cpi.title": "Pasadyang Larawan ng Profile"
 }
