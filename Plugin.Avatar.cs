@@ -27,8 +27,23 @@ public sealed partial class Plugin
     {
         if (!System.IO.File.Exists(picked)) { _avatarUploadStatus = _loc.T("cpi.status.fileNotFound"); _window.MarkDirty(); return; }
 
-        var luaFilePath = picked.Replace(@"\", @"\\");
-        var fileUrl     = "file:///" + picked.Replace('\\', '/');
+        // Stage the file under our ASCII plugin-cache dir so Lua's io.open (ANSI fopen) can read
+        // it even when the user's chosen path contains non-ASCII characters (see Plugin.StagingDir).
+        string staged;
+        try
+        {
+            staged = System.IO.Path.Combine(StagingDir(), "stlr_upload_avatar.png");
+            System.IO.File.Copy(picked, staged, overwrite: true);
+        }
+        catch (System.Exception ex)
+        {
+            _avatarUploadStatus = _loc.T("cpi.status.stageCopyFailed") + ex.Message;
+            _window.MarkDirty();
+            return;
+        }
+
+        var luaFilePath = staged.Replace(@"\", @"\\");
+        var fileUrl     = "file:///" + staged.Replace('\\', '/');
 
         _avatarUploadStatus = _loc.T("cpi.status.starting");
         _window.MarkDirty();

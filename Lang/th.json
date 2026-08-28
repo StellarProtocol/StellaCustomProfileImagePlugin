@@ -16,6 +16,8 @@
   "cpi.status.fileNotFound": "ไม่พบไฟล์",
   "cpi.status.luaNotReady": "Lua ยังไม่พร้อม",
   "cpi.status.namecardReady": "พร้อมแล้ว - เปิดกระเป๋าแล้วใช้การ์ดเปลี่ยนนามบัตร ถ่ายภาพใดก็ได้ แล้วตัวอย่างจะปรากฏขึ้น",
+  "cpi.status.stageCopyFailed": "คัดลอกไฟล์ชั่วคราวล้มเหลว: ",
   "cpi.status.starting": "กำลังเริ่ม...",
+  "cpi.testFileRead": "ทดสอบการอ่านไฟล์",
   "cpi.title": "รูปโปรไฟล์ที่กำหนดเอง"
 }

@@ -16,6 +16,8 @@
   "cpi.status.fileNotFound": "Hindi nahanap ang file",
   "cpi.status.luaNotReady": "Hindi pa handa ang Lua",
   "cpi.status.namecardReady": "Handa na - Buksan ang iyong imbentaryo at gamitin ang Namecard Change card at kumuha ng anumang shot at dapat lumitaw ang preview",
+  "cpi.status.stageCopyFailed": "Nabigo ang pag-stage ng kopya: ",
   "cpi.status.starting": "Nagsisimula...",
+  "cpi.testFileRead": "Subukan ang Pagbasa ng File",
   "cpi.title": "Pasadyang Larawan ng Profile"
 }

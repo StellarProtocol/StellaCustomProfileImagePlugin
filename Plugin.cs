@@ -27,6 +27,8 @@ public sealed partial class Plugin : IStellarPlugin
     private string _namecardUploadStatus = "";
     private bool   _namecardHooksActive  = false;
 
+    private string _diagStatus           = "";
+
     private string           _selectedImagePath   = "";
     private byte[]?          _previewPngBytes     = null;
     private int              _previewHeight       = 200;
@@ -78,6 +80,15 @@ public sealed partial class Plugin : IStellarPlugin
                 OnClick: ChooseFile,
                 Enabled: () => !_dialogOpen,
                 Width:   270f),
+            new ButtonElement(
+                Label:   () => _loc.T("cpi.testFileRead"),
+                OnClick: TestFileRead,
+                Enabled: () => !_dialogOpen,
+                Width:   270f),
+            new ConditionalElement(
+                () => _diagStatus.Length > 0,
+                new TextElement(() => _diagStatus,
+                                Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
         };
 
         elements.AddRange(new HudElement[]
@@ -380,6 +391,25 @@ public sealed partial class Plugin : IStellarPlugin
             if (picked != null)
                 _pendingSelectedPath = picked;
         });
+    }
+
+    // ── Staging dir ─────────────────────────────────────────────────────────────
+    //
+    // Lua io.open reads through the ANSI CRT fopen, which fails on any path containing
+    // non-ASCII characters (a CJK Windows username, folder, or filename — common for this
+    // game's player base). We stage the user's file into this ASCII plugin-cache dir and hand
+    // Lua that path instead, doing the Unicode-sensitive read in .NET (which is Unicode-safe).
+    //
+    // TODO: Residual edge case — if the GAME ITSELF is installed under a non-ASCII path, this
+    // staged path is also non-ASCII and io.open still fails. A future base64/byte-inject upload
+    // (pass the bytes to Lua directly rather than a file path) would remove that last dependency.
+    private static string StagingDir()
+    {
+        var baseDir = System.IO.Path.GetDirectoryName(typeof(Plugin).Assembly.Location);
+        if (string.IsNullOrEmpty(baseDir)) baseDir = System.AppContext.BaseDirectory;
+        var dir = System.IO.Path.Combine(baseDir!, "cache");
+        System.IO.Directory.CreateDirectory(dir);
+        return dir;
     }
 
     // ── Icon ──────────────────────────────────────────────────────────────────

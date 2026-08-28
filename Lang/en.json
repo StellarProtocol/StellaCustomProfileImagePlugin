@@ -16,6 +16,8 @@
   "cpi.status.fileNotFound": "File not found",
   "cpi.status.luaNotReady": "Lua not ready",
   "cpi.status.namecardReady": "Ready - Open your inventory and use the Namecard Change card and take any shot and the preview should appear",
+  "cpi.status.stageCopyFailed": "Stage copy failed: ",
   "cpi.status.starting": "Starting...",
+  "cpi.testFileRead": "Test File Read",
   "cpi.title": "Custom Profile Image"
 }
