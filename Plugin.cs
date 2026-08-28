@@ -21,11 +21,8 @@ public sealed partial class Plugin : IStellarPlugin
 
     private Harmony?    _luaReadyHarmony;
 
-    private string _avatarUploadStatus   = "";
-    private bool   _avatarHooksActive    = false;
-
-    private string _namecardUploadStatus = "";
-    private bool   _namecardHooksActive  = false;
+    private string _uploadStatus = "";
+    private bool   _hooksActive  = false;
 
     private string           _selectedImagePath   = "";
     private byte[]?          _previewPngBytes     = null;
@@ -34,7 +31,7 @@ public sealed partial class Plugin : IStellarPlugin
     private volatile string? _pendingSelectedPath = null;
     private volatile bool    _dialogOpen          = false;
 
-    // Re-entrancy guard: ProcessAvatarUpload calls _services.Lua.DoString, which re-enters the
+    // Re-entrancy guard: ProcessUpload calls _services.Lua.DoString, which re-enters the
     // LuaState.DoString patch and fires OnLuaDoStringStatic again.
     [System.ThreadStatic]
     private static bool _inLuaTick;
@@ -83,46 +80,43 @@ public sealed partial class Plugin : IStellarPlugin
         elements.AddRange(new HudElement[]
         {
             new SeparatorElement(),
-            new TextElement(() => _loc.T("cpi.avatar"), Emphasis: true),
+            // Recommended-size reference — one image serves both, so show both target sizes.
             new TextElement(() => _loc.T("cpi.avatar.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new RowElement(new HudElement[]
-            {
-                new ButtonElement(
-                    Label:   () => _loc.T("cpi.avatar.make"),
-                    OnClick: MakeAvatar,
-                    Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
-                    Width:   100f),
-                new ButtonElement(
-                    Label:   () => _loc.T("cpi.cancel"),
-                    OnClick: ClearAvatarHooks,
-                    Enabled: () => _avatarHooksActive,
-                    Width:   100f),
-            }, Gap: 8f),
-            new ConditionalElement(
-                () => _avatarUploadStatus.Length > 0,
-                new TextElement(() => _avatarUploadStatus,
-                                Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
-            new SeparatorElement(),
-            new TextElement(() => _loc.T("cpi.namecard"), Emphasis: true),
             new TextElement(() => _loc.T("cpi.namecard.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new SeparatorElement(),
+            // How-to instruction block.
+            new TextElement(() => _loc.T("cpi.howto.title"), Emphasis: true),
+            new TextElement(() => _loc.T("cpi.howto.step1"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step2"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step3"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step4"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step5"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step6"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new SeparatorElement(),
             new RowElement(new HudElement[]
             {
                 new ButtonElement(
-                    Label:   () => _loc.T("cpi.namecard.make"),
-                    OnClick: MakeNamecard,
+                    Label:   () => _loc.T("cpi.apply"),
+                    OnClick: ApplyUpload,
                     Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
                     Width:   100f),
                 new ButtonElement(
                     Label:   () => _loc.T("cpi.cancel"),
-                    OnClick: ClearNamecardHooks,
-                    Enabled: () => _namecardHooksActive,
+                    OnClick: ClearHooks,
+                    Enabled: () => _hooksActive,
                     Width:   100f),
             }, Gap: 8f),
             new ConditionalElement(
-                () => _namecardUploadStatus.Length > 0,
-                new TextElement(() => _namecardUploadStatus,
+                () => _uploadStatus.Length > 0,
+                new TextElement(() => _uploadStatus,
                                 Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
         });
 
@@ -224,8 +218,7 @@ public sealed partial class Plugin : IStellarPlugin
         if (pending != null)
         {
             _pendingSelectedPath = null;
-            if (_avatarHooksActive)   { ClearAvatarHooks();   _avatarUploadStatus   = ""; }
-            if (_namecardHooksActive) { ClearNamecardHooks(); _namecardUploadStatus = ""; }
+            if (_hooksActive) { ClearHooks(); _uploadStatus = ""; }
             _selectedImagePath = pending;
             LoadPreview(pending);
             RebuildWindow();
@@ -267,8 +260,7 @@ public sealed partial class Plugin : IStellarPlugin
             if (pending != null)
             {
                 _instance._pendingSelectedPath = null;
-                if (_instance._avatarHooksActive)   { _instance.ClearAvatarHooks();   _instance._avatarUploadStatus   = ""; }
-                if (_instance._namecardHooksActive) { _instance.ClearNamecardHooks(); _instance._namecardUploadStatus = ""; }
+                if (_instance._hooksActive) { _instance.ClearHooks(); _instance._uploadStatus = ""; }
                 _instance._selectedImagePath = pending;
                 _instance.LoadPreview(pending);
                 _instance.RebuildWindow();
@@ -280,10 +272,7 @@ public sealed partial class Plugin : IStellarPlugin
     // ── Lua global helpers ────────────────────────────────────────────────────
 
     private static string LuaSetStatus(string luaValueExpr) =>
-        $"_G.__stlr_av_status=({luaValueExpr})";
-
-    private static string LuaSetNcStatus(string luaValueExpr) =>
-        $"_G.__stlr_nc_status=({luaValueExpr})";
+        $"_G.__stlr_up_status=({luaValueExpr})";
 
     // ── Windows dialog + focus helpers ────────────────────────────────────────
 
