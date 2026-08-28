@@ -17,10 +17,10 @@
   "cpi.preview.hint": "プレビューは最終結果と異なる場合があります。実際の見た目はゲーム内プレビューで確認してください。",
   "cpi.recommendedSize": "推奨画像サイズ",
   "cpi.status.cancelled": "上書きをキャンセルしました",
+  "cpi.status.emptyFile": "選択したファイルが空です",
   "cpi.status.fileNotFound": "ファイルが見つかりません",
   "cpi.status.luaNotReady": "Luaが未準備です",
   "cpi.status.ready": "準備完了 — アバター／ネームカード変更チケットまたはギルドの変更装置を使い、撮影してください。",
-  "cpi.status.stageCopyFailed": "ステージングコピー失敗: ",
   "cpi.status.starting": "開始中...",
   "cpi.title": "カスタムプロフィール画像"
 }

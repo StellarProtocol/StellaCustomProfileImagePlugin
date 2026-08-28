@@ -32,28 +32,38 @@ public sealed partial class Plugin
     {
         if (!System.IO.File.Exists(picked)) { _uploadStatus = _loc.T("cpi.status.fileNotFound"); _window.MarkDirty(); return; }
 
-        // Stage the file under our ASCII plugin-cache dir so Lua's io.open (ANSI fopen) can read it
-        // even when the user's chosen path contains non-ASCII characters (see Plugin.StagingDir).
-        string staged;
+        // Read the user's PNG bytes in .NET (Unicode-safe) rather than letting Lua's io.open touch the
+        // path at all. io.open goes through the ANSI CRT fopen, which fails on any non-ASCII path — and
+        // staging to an ASCII cache copy still failed when the GAME itself is installed under a non-ASCII
+        // path. We hand the bytes to Lua as base64 and decode them there, so the upload depends on NO path.
+        byte[] bytes;
         try
         {
-            staged = System.IO.Path.Combine(StagingDir(), "stlr_upload.png");
-            System.IO.File.Copy(picked, staged, overwrite: true);
+            bytes = System.IO.File.ReadAllBytes(picked);
         }
         catch (System.Exception ex)
         {
-            _uploadStatus = _loc.T("cpi.status.stageCopyFailed") + ex.Message;
+            _uploadStatus = _loc.T("cpi.status.fileNotFound") + ": " + ex.Message;
             _window.MarkDirty();
             return;
         }
+        if (bytes.Length == 0) { _uploadStatus = _loc.T("cpi.status.emptyFile"); _window.MarkDirty(); return; }
 
-        var luaFilePath = staged.Replace(@"\", @"\\");
-        var fileUrl     = "file:///" + staged.Replace('\\', '/');
+        // Preview URL still points at the ORIGINAL file — Unity's AsyncLoadUrlImage is UTF-8-aware and
+        // handled non-ASCII user paths fine (that was never the broken part). Escape ' for the single-quoted
+        // Lua literal (a path may contain an apostrophe; backslashes are already turned to forward slashes).
+        var b64     = System.Convert.ToBase64String(bytes);
+        var fileUrl = ("file:///" + picked.Replace('\\', '/')).Replace("'", @"\'");
 
         _uploadStatus = _loc.T("cpi.status.starting");
         _window.MarkDirty();
 
         if (!_services.Lua.Ready) { _uploadStatus = _loc.T("cpi.status.luaNotReady"); _window.MarkDirty(); return; }
+
+        // Hand the image bytes to Lua as a base64 global in its OWN DoString, keeping the bulk data out of
+        // the hook-arming string below. Base64's alphabet (A–Z a–z 0–9 + / =) has no ' or \, so the
+        // single-quoted Lua literal needs no escaping. Decoded on confirm by __stlr_up_b64dec.
+        _services.Lua.DoString("_G.__stlr_up_b64='" + b64 + "'");
 
         // Setup runs under pcall; a synchronous error() is parked in a status global and read back
         // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
@@ -68,6 +78,25 @@ public sealed partial class Plugin
             " local origUpP=stub.UploadPictureResultNtf" +
             " local origRev=stub.ReviewAvatarInfoNtf" +
             " _G.__stlr_up_origRet=origRet _G.__stlr_up_origGet=origGet _G.__stlr_up_origUpR=origUpR _G.__stlr_up_origUpP=origUpP _G.__stlr_up_origRev=origRev" +
+            // Pure-Lua base64 decoder (standard 4-sextet→3-byte; math-only so no bit lib needed). Byte-exact
+            // over the full 0–255 range and handles '=' padding (dropped by the class strip; trailing short
+            // groups skip the missing bytes via the c3/c4 nil guards). Decodes the C#-supplied image bytes
+            // so the upload never touches a file path — fixes non-ASCII game-install paths io.open can't read.
+            " _G.__stlr_up_b64dec=function(data)" +
+            "  local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'" +
+            "  local lut={} for i=1,#b do lut[b:sub(i,i)]=i-1 end" +
+            "  data=data:gsub('[^'..b..']','')" +
+            "  local out={} local n=#data local i=1" +
+            "  while i<=n do" +
+            "   local c1=lut[data:sub(i,i)] or 0 local c2=lut[data:sub(i+1,i+1)] or 0" +
+            "   local c3=lut[data:sub(i+2,i+2)] local c4=lut[data:sub(i+3,i+3)]" +
+            "   out[#out+1]=string.char(c1*4+math.floor(c2/16))" +
+            "   if c3 then out[#out+1]=string.char((c2%16)*16+math.floor(c3/4))" +
+            "    if c4 then out[#out+1]=string.char((c3%4)*64+c4) end end" +
+            "   i=i+4" +
+            "  end" +
+            "  return table.concat(out)" +
+            " end" +
             // Avatar preview hook (setHeadImg fires on popup open — armed from Apply, stays armed).
             " local popupCls=require('ui.view.photo_personalzone_idcard_popup_view')" +
             " local origSetHead=popupCls.setHeadImg _G.__stlr_up_origSetHead=origSetHead" +
@@ -118,14 +147,14 @@ public sealed partial class Plugin
             // Success: fully disarm every hook and nil the origin globals (Cancel becomes a no-op).
             "       stub.RetAvatarToken=origRet stub.GetPhotoTokenNtf=origGet stub.UploadPhotoResultNtf=origUpR stub.UploadPictureResultNtf=origUpP stub.ReviewAvatarInfoNtf=origRev" +
             "       popupCls.setHeadImg=origSetHead idcardCls.setPhotoData=origSetPhoto cvm.GetHeadOrBodyPhotoToken=origGetToken" +
-            "       _G.__stlr_up_origRet=nil _G.__stlr_up_origGet=nil _G.__stlr_up_origUpR=nil _G.__stlr_up_origUpP=nil _G.__stlr_up_origRev=nil _G.__stlr_up_origGetToken=nil _G.__stlr_up_origSetHead=nil _G.__stlr_up_origSetPhoto=nil" +
+            "       _G.__stlr_up_origRet=nil _G.__stlr_up_origGet=nil _G.__stlr_up_origUpR=nil _G.__stlr_up_origUpP=nil _G.__stlr_up_origRev=nil _G.__stlr_up_origGetToken=nil _G.__stlr_up_origSetHead=nil _G.__stlr_up_origSetPhoto=nil _G.__stlr_up_b64=nil _G.__stlr_up_b64dec=nil" +
             "      else " + LuaSetStatus("'Confirm err:'..(ret and tostring(ret.errCode) or '?')") + " stub.RetAvatarToken=origRet end" +
             "     end,function(e)" + LuaSetStatus("'Coro err:'..tostring(e)") + " end)()" +
             "    end" +
-            "    local _pf=io.open('" + luaFilePath + "','rb')" +
-            "    if not _pf then " + LuaSetStatus("'No file " + luaFilePath + "'") + " stub.RetAvatarToken=origRet return end" +
-            "    local _bytes=_pf:read('*a') _pf:close()" +
-            "    if not _bytes or #_bytes==0 then " + LuaSetStatus("'Empty file'") + " stub.RetAvatarToken=origRet return end" +
+            "    local _b64=_G.__stlr_up_b64" +
+            "    if not _b64 or #_b64==0 then " + LuaSetStatus("'No image bytes'") + " stub.RetAvatarToken=origRet return end" +
+            "    local _bytes=__stlr_up_b64dec(_b64)" +
+            "    if not _bytes or #_bytes==0 then " + LuaSetStatus("'Decode failed'") + " stub.RetAvatarToken=origRet return end" +
             "    " + LuaSetStatus("'Uploading '..(#_bytes)..'b...'") +
             "    Z.UploadMgr:UploadPictureToCos(up,_bytes)" +
             "   end)" +
@@ -182,6 +211,7 @@ public sealed partial class Plugin
             " _G.__stlr_up_origRet=nil _G.__stlr_up_origGet=nil _G.__stlr_up_origUpR=nil" +
             " _G.__stlr_up_origUpP=nil _G.__stlr_up_origRev=nil" +
             " _G.__stlr_up_origGetToken=nil _G.__stlr_up_origSetHead=nil _G.__stlr_up_origSetPhoto=nil _G.__stlr_up_status=nil" +
+            " _G.__stlr_up_b64=nil _G.__stlr_up_b64dec=nil" +
             "end)");
         _hooksActive  = false;
         _uploadStatus = _loc.T("cpi.status.cancelled");
