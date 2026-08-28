@@ -21,6 +21,12 @@ public sealed partial class Plugin : IStellarPlugin
 
     private Harmony?    _luaReadyHarmony;
 
+    // The live main LuaState captured off the DoString patch's `__instance`. LuaInterface.LuaClient is
+    // absent from the interop assembly, so LuaClient.GetMainState() can't reach the running state — but the
+    // `this` of every LuaState.DoString call IS that main state. The game calls DoString every frame, so this
+    // is populated long before any upload. Read by PushBytesToLuaGlobal as its preferred instance source.
+    private static object? _capturedLuaState;
+
     private string _uploadStatus = "";
     private bool   _hooksActive  = false;
     // Last value mirrored out of the Lua status global (_G.__stlr_up_status). The uploader parks its
@@ -198,6 +204,9 @@ public sealed partial class Plugin : IStellarPlugin
 
         _luaReadyHarmony = new Harmony(HarmonyId + ".luaready");
         _luaReadyHarmony.Patch(target, postfix: new HarmonyMethod(typeof(Plugin), nameof(OnLuaDoStringStatic)));
+        // Second postfix on the SAME DoString target: capture the live main LuaState from `__instance`.
+        // Attached ONLY here (not to UpdateManager.Update below, whose instance is the wrong type).
+        _luaReadyHarmony.Patch(target, postfix: new HarmonyMethod(typeof(Plugin), nameof(CaptureLuaStatePostfix)));
         _services.Log.Info("[CustomProfileImage] LuaReadyTrigger installed");
 
         // Hook UpdateManager.Update — AOT-compiled, fires every Unity frame,
@@ -269,6 +278,14 @@ public sealed partial class Plugin : IStellarPlugin
             _previewHeight   = 200;
             _services.Log.Warning($"[CustomProfileImage] LoadPreview failed: {ex.Message}");
         }
+    }
+
+    // Capture the running main LuaState the first time DoString is called. `__instance` is the LuaState the
+    // game invoked DoString on — the one whose `L` handle PushBytesToLuaGlobal needs. Only ever attached to
+    // the LuaState.DoString target, so __instance is always a LuaState here.
+    private static void CaptureLuaStatePostfix(object __instance)
+    {
+        if (_capturedLuaState == null && __instance != null) _capturedLuaState = __instance;
     }
 
     private static void OnLuaDoStringStatic()

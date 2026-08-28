@@ -231,42 +231,72 @@ public sealed partial class Plugin
     {
         try
         {
-            var luaClientType = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaClient");
-            var luaStateType  = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaState");
-            var luaDllType    = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaDLL");
-            if (luaClientType == null || luaStateType == null || luaDllType == null)
+            // LuaInterface.LuaClient is NOT present in the interop assembly, so LuaClient.GetMainState() is
+            // unreachable — that was the old "Lua interop types not found" failure. LuaState + LuaDLL ARE
+            // present; we get the instance off the captured DoString `__instance` (or a reflected mainState),
+            // and drive lua_pushlstring / lua_setglobal off LuaDLL directly.
+            var luaStateType = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaState");
+            var luaDllType   = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaDLL");
+            if (luaStateType == null || luaDllType == null)
             {
-                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: Lua interop types not found");
+                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: LuaState/LuaDLL interop types not found");
                 return false;
             }
 
-            // LuaClient.GetMainState() → the live LuaState instance.
-            var getMainState = luaClientType.GetMethod("GetMainState",
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            var mainState = getMainState?.Invoke(null, null);
+            // Instance source, in order: (1) the LuaState captured off the DoString patch (preferred — it's
+            // the actual running main state); (2) a reflected static `mainState` on LuaState, which
+            // Il2CppInterop may expose as a PROPERTY or a FIELD, so try both.
+            object? mainState = _capturedLuaState;
+            string  instSource = "captured";
             if (mainState == null)
             {
-                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: GetMainState returned null (Lua not up?)");
+                mainState = luaStateType.GetProperty("mainState",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.GetValue(null);
+                if (mainState != null) instSource = "mainState-prop";
+            }
+            if (mainState == null)
+            {
+                mainState = luaStateType.GetField("mainState",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.GetValue(null);
+                if (mainState != null) instSource = "mainState-field";
+            }
+            if (mainState == null)
+            {
+                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: no LuaState instance (captured/mainState both null)");
                 return false;
             }
 
-            // `L` (the raw lua_State*) is a PUBLIC field on LuaStatePtr, inherited by LuaState. GetField on
-            // the derived type doesn't surface inherited fields without FlattenHierarchy; fall back to the
-            // base type if it still comes back null.
-            var lField = luaStateType.GetField("L",
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.FlattenHierarchy);
-            if (lField == null)
-            {
-                var luaStatePtrType = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaStatePtr");
-                lField = luaStatePtrType?.GetField("L",
+            // `L` (the raw lua_State*) lives on LuaStatePtr, inherited by LuaState. In this project's
+            // Il2CppInterop the il2cpp instance FIELD is commonly surfaced as a PROPERTY, so try property
+            // first (derived then base), then field (derived w/ FlattenHierarchy, then base).
+            var luaStatePtrType = Stellar.Abstractions.Services.StellarInterop.FindType("LuaInterface.LuaStatePtr");
+            object? lRaw = null;
+            string  lSource = "";
+            var lProp = luaStateType.GetProperty("L",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                ?? luaStatePtrType?.GetProperty("L",
                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-            }
-            if (lField == null)
+            if (lProp != null) { lRaw = lProp.GetValue(mainState); lSource = "property"; }
+            if (lRaw == null)
             {
-                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: LuaStatePtr.L field not found");
+                var lField = luaStateType.GetField("L",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.FlattenHierarchy)
+                    ?? luaStatePtrType?.GetField("L",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (lField != null) { lRaw = lField.GetValue(mainState); lSource = "field"; }
+            }
+            if (lRaw == null)
+            {
+                _services.Log.Warning("[CustomProfileImage] PushBytesToLuaGlobal: LuaState.L not found (property nor field)");
                 return false;
             }
-            var L = (System.IntPtr)lField.GetValue(mainState)!;
+            var L = (System.IntPtr)lRaw;
+            if (L == System.IntPtr.Zero)
+            {
+                _services.Log.Warning($"[CustomProfileImage] PushBytesToLuaGlobal: L == 0 (inst={instSource}, via {lSource})");
+                return false;
+            }
+            _services.Log.Info($"[CustomProfileImage] LuaState L resolved = 0x{((long)L):X} via {lSource} (inst={instSource})");
 
             // Match lua_pushlstring(IntPtr, <byte array>, int) by name + shape — NOT the tolua_pushlstring
             // variants, nor the 2-arg ReadOnlySpan overload. The array param may surface as managed byte[]
