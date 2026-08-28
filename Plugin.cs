@@ -81,6 +81,7 @@ public sealed partial class Plugin : IStellarPlugin
         {
             new SeparatorElement(),
             // Recommended-size reference — one image serves both, so show both target sizes.
+            new TextElement(() => _loc.T("cpi.recommendedSize"), Emphasis: true),
             new TextElement(() => _loc.T("cpi.avatar.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
             new TextElement(() => _loc.T("cpi.namecard.hint"),
