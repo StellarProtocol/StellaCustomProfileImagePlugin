@@ -23,6 +23,9 @@ public sealed partial class Plugin : IStellarPlugin
 
     private string _uploadStatus = "";
     private bool   _hooksActive  = false;
+    // Last value mirrored out of the Lua status global (_G.__stlr_up_status). The uploader parks its
+    // diagnostic strings there; we surface changes to the window + log so a failed confirm isn't invisible.
+    private string? _lastLuaStatus = null;
 
     private string           _selectedImagePath   = "";
     private byte[]?          _previewPngBytes     = null;
@@ -225,6 +228,22 @@ public sealed partial class Plugin : IStellarPlugin
             _selectedImagePath = pending;
             LoadPreview(pending);
             RebuildWindow();
+        }
+
+        // Mirror the Lua-side upload status into the window + log while hooks are armed. The uploader
+        // parks its progress/error strings in _G.__stlr_up_status (via LuaSetStatus) but nothing reads
+        // them back, so confirm/upload failures were invisible. One ReadGlobalString per frame, only
+        // while active. Null/absent means "no new status" — leave the C#-set Ready/error text alone.
+        if (_hooksActive)
+        {
+            var luaStatus = _services.Lua.ReadGlobalString("__stlr_up_status");
+            if (luaStatus != null && luaStatus != _lastLuaStatus)
+            {
+                _lastLuaStatus = luaStatus;
+                _uploadStatus  = luaStatus;
+                _window.MarkDirty();
+                _services.Log.Info($"[CustomProfileImage] lua-status: {luaStatus}");
+            }
         }
     }
 

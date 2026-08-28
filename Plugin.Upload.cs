@@ -30,6 +30,10 @@ public sealed partial class Plugin
     //                  any error it restores only RetAvatarToken and leaves previews + GetToken armed.
     private void ProcessUpload(string picked)
     {
+        // Fresh upload — forget any status mirrored from a prior confirm so the per-frame mirror re-fires
+        // on the first new value even if it repeats the last one.
+        _lastLuaStatus = null;
+
         if (!System.IO.File.Exists(picked)) { _uploadStatus = _loc.T("cpi.status.fileNotFound"); _window.MarkDirty(); return; }
 
         // Read the user's PNG bytes in .NET (Unicode-safe) rather than letting Lua's io.open touch the
@@ -64,6 +68,13 @@ public sealed partial class Plugin
         // the hook-arming string below. Base64's alphabet (A–Z a–z 0–9 + / =) has no ' or \, so the
         // single-quoted Lua literal needs no escaping. Decoded on confirm by __stlr_up_b64dec.
         _services.Lua.DoString("_G.__stlr_up_b64='" + b64 + "'");
+
+        // Verify the ~817KB single-DoString injection actually landed — an oversized DoString can silently
+        // fail to set the global, leaving the decoder with no bytes. Read the stored length back: if `got`
+        // is 0/nil/short vs expected, the injection didn't take.
+        _services.Lua.DoString("_G.__stlr_up_b64len=tostring(#(_G.__stlr_up_b64 or ''))");
+        var lenStr = _services.Lua.ReadGlobalString("__stlr_up_b64len");
+        _services.Log.Info($"[CustomProfileImage] b64 injected: got {lenStr ?? "nil"} chars, expected {b64.Length}");
 
         // Setup runs under pcall; a synchronous error() is parked in a status global and read back
         // via ReadGlobalString (ILua.DoString is fire-and-forget). setupErr == null means success.
@@ -213,8 +224,9 @@ public sealed partial class Plugin
             " _G.__stlr_up_origGetToken=nil _G.__stlr_up_origSetHead=nil _G.__stlr_up_origSetPhoto=nil _G.__stlr_up_status=nil" +
             " _G.__stlr_up_b64=nil _G.__stlr_up_b64dec=nil" +
             "end)");
-        _hooksActive  = false;
-        _uploadStatus = _loc.T("cpi.status.cancelled");
+        _hooksActive   = false;
+        _lastLuaStatus = null;
+        _uploadStatus  = _loc.T("cpi.status.cancelled");
         _window.MarkDirty();
     }
 }
