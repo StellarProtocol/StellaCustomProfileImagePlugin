@@ -21,11 +21,17 @@ public sealed partial class Plugin : IStellarPlugin
 
     private Harmony?    _luaReadyHarmony;
 
-    private string _avatarUploadStatus   = "";
-    private bool   _avatarHooksActive    = false;
+    // The live main LuaState captured off the DoString patch's `__instance`. LuaInterface.LuaClient is
+    // absent from the interop assembly, so LuaClient.GetMainState() can't reach the running state — but the
+    // `this` of every LuaState.DoString call IS that main state. The game calls DoString every frame, so this
+    // is populated long before any upload. Read by PushBytesToLuaGlobal as its preferred instance source.
+    private static object? _capturedLuaState;
 
-    private string _namecardUploadStatus = "";
-    private bool   _namecardHooksActive  = false;
+    private string _uploadStatus = "";
+    private bool   _hooksActive  = false;
+    // Last value mirrored out of the Lua status global (_G.__stlr_up_status). The uploader parks its
+    // diagnostic strings there; we surface changes to the window + log so a failed confirm isn't invisible.
+    private string? _lastLuaStatus = null;
 
     private string           _selectedImagePath   = "";
     private byte[]?          _previewPngBytes     = null;
@@ -34,7 +40,7 @@ public sealed partial class Plugin : IStellarPlugin
     private volatile string? _pendingSelectedPath = null;
     private volatile bool    _dialogOpen          = false;
 
-    // Re-entrancy guard: ProcessAvatarUpload calls _services.Lua.DoString, which re-enters the
+    // Re-entrancy guard: ProcessUpload calls _services.Lua.DoString, which re-enters the
     // LuaState.DoString patch and fires OnLuaDoStringStatic again.
     [System.ThreadStatic]
     private static bool _inLuaTick;
@@ -83,46 +89,46 @@ public sealed partial class Plugin : IStellarPlugin
         elements.AddRange(new HudElement[]
         {
             new SeparatorElement(),
-            new TextElement(() => _loc.T("cpi.avatar"), Emphasis: true),
+            // Recommended-size reference — one image serves both, so show both target sizes.
+            new TextElement(() => _loc.T("cpi.recommendedSize"), Emphasis: true),
             new TextElement(() => _loc.T("cpi.avatar.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new RowElement(new HudElement[]
-            {
-                new ButtonElement(
-                    Label:   () => _loc.T("cpi.avatar.make"),
-                    OnClick: MakeAvatar,
-                    Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
-                    Width:   100f),
-                new ButtonElement(
-                    Label:   () => _loc.T("cpi.cancel"),
-                    OnClick: ClearAvatarHooks,
-                    Enabled: () => _avatarHooksActive,
-                    Width:   100f),
-            }, Gap: 8f),
-            new ConditionalElement(
-                () => _avatarUploadStatus.Length > 0,
-                new TextElement(() => _avatarUploadStatus,
-                                Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
-            new SeparatorElement(),
-            new TextElement(() => _loc.T("cpi.namecard"), Emphasis: true),
             new TextElement(() => _loc.T("cpi.namecard.hint"),
                             Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new SeparatorElement(),
+            // How-to instruction block.
+            new TextElement(() => _loc.T("cpi.howto.title"), Emphasis: true),
+            new TextElement(() => _loc.T("cpi.howto.step1"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step2"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step3"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step4"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step5"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new TextElement(() => _loc.T("cpi.howto.step6"),
+                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
+            new SeparatorElement(),
             new RowElement(new HudElement[]
             {
                 new ButtonElement(
-                    Label:   () => _loc.T("cpi.namecard.make"),
-                    OnClick: MakeNamecard,
+                    Label:   () => _loc.T("cpi.apply"),
+                    OnClick: ApplyUpload,
                     Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
-                    Width:   100f),
+                    // Wide enough for the longest localized label on ONE line:
+                    // CJK ja "アバター／ネームカードを作成" (14 full-width glyphs) is the constraint.
+                    Width:   280f),
                 new ButtonElement(
                     Label:   () => _loc.T("cpi.cancel"),
-                    OnClick: ClearNamecardHooks,
-                    Enabled: () => _namecardHooksActive,
-                    Width:   100f),
+                    OnClick: ClearHooks,
+                    Enabled: () => _hooksActive,
+                    Width:   95f),
             }, Gap: 8f),
             new ConditionalElement(
-                () => _namecardUploadStatus.Length > 0,
-                new TextElement(() => _namecardUploadStatus,
+                () => _uploadStatus.Length > 0,
+                new TextElement(() => _uploadStatus,
                                 Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
         });
 
@@ -148,7 +154,7 @@ public sealed partial class Plugin : IStellarPlugin
             Spec: new WindowSpec(
                 Id:          "customprofleimage.main",
                 Title:       _loc.T("cpi.title"),
-                DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 460f, 20f, 440f, 0f),
+                DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 520f, 20f, 500f, 0f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
             { Draggable = true, Closable = true, StartVisible = false,
@@ -198,6 +204,9 @@ public sealed partial class Plugin : IStellarPlugin
 
         _luaReadyHarmony = new Harmony(HarmonyId + ".luaready");
         _luaReadyHarmony.Patch(target, postfix: new HarmonyMethod(typeof(Plugin), nameof(OnLuaDoStringStatic)));
+        // Second postfix on the SAME DoString target: capture the live main LuaState from `__instance`.
+        // Attached ONLY here (not to UpdateManager.Update below, whose instance is the wrong type).
+        _luaReadyHarmony.Patch(target, postfix: new HarmonyMethod(typeof(Plugin), nameof(CaptureLuaStatePostfix)));
         _services.Log.Info("[CustomProfileImage] LuaReadyTrigger installed");
 
         // Hook UpdateManager.Update — AOT-compiled, fires every Unity frame,
@@ -224,13 +233,40 @@ public sealed partial class Plugin : IStellarPlugin
         if (pending != null)
         {
             _pendingSelectedPath = null;
-            if (_avatarHooksActive)   { ClearAvatarHooks();   _avatarUploadStatus   = ""; }
-            if (_namecardHooksActive) { ClearNamecardHooks(); _namecardUploadStatus = ""; }
+            if (_hooksActive) { ClearHooks(); _uploadStatus = ""; }
             _selectedImagePath = pending;
             LoadPreview(pending);
             RebuildWindow();
         }
+
+        // Mirror the Lua-side upload status into the window + log while hooks are armed. The uploader
+        // parks a stable CODE in _G.__stlr_up_status (via LuaSetStatus) — Lua can't call _loc.T, so it
+        // parks 'uploading'/'done'/'error' and we map the code to a localized string here. The specific
+        // technical cause stays in the Lua logError traces (Player.log), out of the user's window. One
+        // ReadGlobalString per frame, only while active. Change-detection runs on the RAW code so a
+        // repeated code doesn't re-fire. Null/absent means "no new status" — leave the C#-set text alone.
+        if (_hooksActive)
+        {
+            var luaStatus = _services.Lua.ReadGlobalString("__stlr_up_status");
+            if (luaStatus != null && luaStatus != _lastLuaStatus)
+            {
+                _lastLuaStatus = luaStatus;
+                _uploadStatus  = MapLuaStatus(luaStatus);
+                _window.MarkDirty();
+                _services.Log.Info($"[CustomProfileImage] lua-status: {luaStatus}");
+            }
+        }
     }
+
+    // Map the stable status CODE the Lua uploader parks to a localized, user-friendly string. Unknown or
+    // legacy values fall through to the raw string so nothing is silently swallowed.
+    private string MapLuaStatus(string code) => code switch
+    {
+        "uploading" => _loc.T("cpi.status.uploading"),
+        "done"      => _loc.T("cpi.status.done"),
+        "error"     => _loc.T("cpi.status.uploadFailed"),
+        _           => code,
+    };
 
     private void LoadPreview(string path)
     {
@@ -256,6 +292,14 @@ public sealed partial class Plugin : IStellarPlugin
         }
     }
 
+    // Capture the running main LuaState the first time DoString is called. `__instance` is the LuaState the
+    // game invoked DoString on — the one whose `L` handle PushBytesToLuaGlobal needs. Only ever attached to
+    // the LuaState.DoString target, so __instance is always a LuaState here.
+    private static void CaptureLuaStatePostfix(object __instance)
+    {
+        if (_capturedLuaState == null && __instance != null) _capturedLuaState = __instance;
+    }
+
     private static void OnLuaDoStringStatic()
     {
         if (_instance == null || _inLuaTick) return;
@@ -267,8 +311,7 @@ public sealed partial class Plugin : IStellarPlugin
             if (pending != null)
             {
                 _instance._pendingSelectedPath = null;
-                if (_instance._avatarHooksActive)   { _instance.ClearAvatarHooks();   _instance._avatarUploadStatus   = ""; }
-                if (_instance._namecardHooksActive) { _instance.ClearNamecardHooks(); _instance._namecardUploadStatus = ""; }
+                if (_instance._hooksActive) { _instance.ClearHooks(); _instance._uploadStatus = ""; }
                 _instance._selectedImagePath = pending;
                 _instance.LoadPreview(pending);
                 _instance.RebuildWindow();
@@ -279,11 +322,10 @@ public sealed partial class Plugin : IStellarPlugin
 
     // ── Lua global helpers ────────────────────────────────────────────────────
 
+    // rawset bypasses the game's strict-global __newindex guard, which rejects undeclared-global writes
+    // (a plain `_G.__stlr_up_status=...` is silently blocked, leaving the value nil).
     private static string LuaSetStatus(string luaValueExpr) =>
-        $"_G.__stlr_av_status=({luaValueExpr})";
-
-    private static string LuaSetNcStatus(string luaValueExpr) =>
-        $"_G.__stlr_nc_status=({luaValueExpr})";
+        $"rawset(_G,'__stlr_up_status',({luaValueExpr}))";
 
     // ── Windows dialog + focus helpers ────────────────────────────────────────
 
