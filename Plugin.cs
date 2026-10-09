@@ -56,13 +56,16 @@ public sealed partial class Plugin : IStellarPlugin
 
         _window = RegisterWindow();
 
+        // Title stays the fixed literal "Custom Profile Image" — the stable pin-identity key
+        // (ILauncher.cs:49-50) — so a pinned tile survives a language change; TitleProvider carries the
+        // live-localized display.
         _launcherEntry = _services.Launcher.Register(new LauncherEntry(
-            Title:   _loc.T("cpi.title"),
+            Title:   "Custom Profile Image",
             IconPng: LoadIconPng(),
             IconKey: null,
             OnOpen:  () => _window.SetVisible(true))
         { Group = LauncherGroup.Plugin,
-          // Re-localize the tile title live on a language change (Title alone is a captured string).
+          // Re-localize the tile DISPLAY on a language change; Title above never changes (pin identity).
           TitleProvider = () => _loc.T("cpi.title"),
           ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
 
