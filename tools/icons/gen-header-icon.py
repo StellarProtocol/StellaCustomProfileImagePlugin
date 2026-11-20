@@ -1,7 +1,9 @@
-"""Header glyph for the Custom Profile Image window: a portrait card (rounded frame + head + shoulders), the approved
-prototype's icon, redrawn PER SIZE on the pixel grid (house icon rule, Stellar-Design-Language.md section 3: never one
-master scaled down — thin strokes go soft grey). White flat glyph on transparent; the accent tile behind it is drawn by
-the plugin (Plugin.Style.Blocks.cs IconBox).
+"""Header glyph for the Custom Profile Image window: the plugin's own ID-card icon (resources/customprofleimage-icon.png,
+the 64 px launcher art — rounded card, person bust on the left, three text lines on the right), redrawn PER SIZE on the
+pixel grid (house icon rule, Stellar-Design-Language.md section 3: never one master scaled down — thin strokes go soft
+grey). White flat glyph on transparent; the accent tile behind it is drawn by the plugin (Plugin.Style.Blocks.cs IconBox).
+All proportions are the 64 px original's, measured off its pixels (comments give the 64 px value), so the header tile and
+the launcher read as the same icon. The 64 px launcher art itself is hand-made and NOT generated here.
 
 PIL's ImageDraw draws WITHOUT anti-aliasing, so every stroke lands on whole pixels. Coordinate maths uses floor(v + 0.5),
 NOT round(): Python's round() is banker's rounding and snaps neighbouring sizes inconsistently (KB
@@ -17,6 +19,49 @@ from PIL import Image, ImageDraw
 SIZES = (16, 18, 24, 32, 36, 48)   # header glyph = 24 canvas units: 18 @1080p, 24 @1440p, 36 @4K (+ spares)
 WHITE = (255, 255, 255, 255)
 
+# 16 / 18 px are HAND-HINTED: at those sizes the measured proportions round the second and third text lines into one
+# block and push the shoulders into the card edge. Same motif, every element kept one clear pixel apart.
+HAND = {
+    16: (
+        "................",
+        "................",
+        "................",
+        "..############..",
+        ".#............#.",
+        ".#...##.......#.",
+        ".#..#..#..###.#.",
+        ".#...##.......#.",
+        ".#........###.#.",
+        ".#..####......#.",
+        ".#.#....#.###.#.",
+        ".#............#.",
+        "..############..",
+        "................",
+        "................",
+        "................",
+    ),
+    18: (
+        "..................",
+        "..................",
+        "..................",
+        "..##############..",
+        ".#..............#.",
+        ".#...##.........#.",
+        ".#..#..#...###..#.",
+        ".#..#..#........#.",
+        ".#...##....###..#.",
+        ".#..............#.",
+        ".#..####........#.",
+        ".#.#....#..####.#.",
+        ".#.#....#.......#.",
+        ".#..............#.",
+        "..##############..",
+        "..................",
+        "..................",
+        "..................",
+    ),
+}
+
 
 def rnd(v: float) -> int:
     return math.floor(v + 0.5)
@@ -24,23 +69,35 @@ def rnd(v: float) -> int:
 
 def draw(size: int) -> Image.Image:
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    if size in HAND:
+        for y, row in enumerate(HAND[size]):
+            for x, c in enumerate(row):
+                if c == "#":
+                    im.putpixel((x, y), WHITE)
+        return im
     d = ImageDraw.Draw(im)
-    w = max(2, rnd(size / 12))             # stroke: 2 px up to 24, 3 px at 32/36, 4 px at 48
-    m = rnd(size * 0.125)                  # frame margin (the prototype's 3/24)
-    r = max(2, rnd(size * 0.125))          # frame corner radius
-    d.rounded_rectangle((m, m, size - 1 - m, size - 1 - m), radius=r, outline=WHITE, width=w)
+    f = size / 64.0
+    w = max(1, rnd(3 * f))                 # card / bust stroke: 3 px @64 → 1 px up to 24, 2 px at 32–48
+    lw = max(1, rnd(2 * f))                # text-line thickness: 2 px @64 → 1 px up to 36, 2 px at 48
 
-    # Head: an outlined circle centred on the vertical axis, upper half of the frame.
-    cx = (size - 1) / 2
-    hr = size * 0.135 + w / 2              # outer radius
-    hy = size * 0.42
-    d.ellipse((rnd(cx - hr), rnd(hy - hr), rnd(cx + hr), rnd(hy + hr)), outline=WHITE, width=w)
+    # Card: x 3..60, y 11..52 @64 (a landscape ID card), corner radius ~6.
+    left, right = rnd(3 * f), size - 1 - rnd(3 * f)
+    top, bottom = rnd(11 * f), size - 1 - rnd(11 * f)
+    d.rounded_rectangle((left, top, right, bottom), radius=max(1, rnd(6 * f)), outline=WHITE, width=w)
 
-    # Shoulders: the upper half of an ellipse whose base sits on the frame's inner bottom edge.
-    sw = size * 0.27                       # half-width of the shoulders
-    top = rnd(size * 0.63)
-    bottom = size - 1 - m                  # clipped by the frame stroke itself
-    d.arc((rnd(cx - sw), top, rnd(cx + sw), top + 2 * (bottom - top)), start=180, end=360, fill=WHITE, width=w)
+    # Head: outlined circle, centre (20.5, 25.8), outer radius 6.5 @64.
+    cx, hy, hr = 20.5 * f, 25.8 * f, max(6.5 * f, w + 0.75)
+    d.ellipse((rnd(cx - hr), rnd(hy - hr), rnd(cx + hr) - 1, rnd(hy + hr) - 1), outline=WHITE, width=w)
+
+    # Shoulders: upper half of an ellipse, top y 34, ends at y 43.5, half-width 11.5 @64 (open at the bottom).
+    sw, st, sb = 11.5 * f, rnd(34 * f), rnd(43.5 * f)
+    d.arc((rnd(cx - sw), st, rnd(cx + sw) - 1, st + 2 * (sb - st)), start=180, end=360, fill=WHITE, width=w)
+
+    # Text lines: x 39..50 (short) / 39..54 (long), centred on y 24.5 / 32.5 / 39.5 @64.
+    x0 = rnd(39 * f)
+    for yc, x1 in ((24.5, 50), (32.5, 50), (39.5, 54)):
+        y0 = rnd(yc * f - lw / 2)
+        d.rectangle((x0, y0, rnd(x1 * f), y0 + lw - 1), fill=WHITE)
     return im
 
 
