@@ -28,6 +28,9 @@ public sealed partial class Plugin
     //   Token reply    uploads the user's file with pictureType=snapType. On success it FULLY disarms
     //                  (restores both previews, GetToken, RetAvatarToken, nils the origin globals). On
     //                  any error it restores only RetAvatarToken and leaves previews + GetToken armed.
+    // Duplicate-confirm safety (S4): setup first restores any still-armed hooks (no stacking on re-Apply);
+    // GetToken ignores confirms while one is in flight (_G.__stlr_up_busy); the uploader is one-shot; and
+    // 'done' is sticky against a late error (LuaSetErrorStatus).
     private void ProcessUpload(string picked)
     {
         // Fresh upload — forget any status mirrored from a prior confirm so the per-frame mirror re-fires
@@ -84,6 +87,15 @@ public sealed partial class Plugin
         // Async handlers (server callbacks) use pcall + LuaSetStatus internally.
         _services.Lua.DoString(
             "rawset(_G,'__stlr_up_setup',nil) local _stlrOk,_stlrErr=pcall(function()" +
+            // Idempotent re-Apply: if a previous Apply's hooks are still armed, put the REAL originals back
+            // first. Otherwise the captures below would read our own hook as "original" and the hooks stack —
+            // one confirm then nests through both copies and requests two tokens (two uploads, the second
+            // rejected by the server with 4677, whose late error overwrote 'done'). Bytes are NOT nil'd here:
+            // PushBytesToLuaGlobal already set them for this Apply.
+            LuaRestoreHooks +
+            // Fresh upload: forget the previous run's terminal status (a leftover 'done' would otherwise be
+            // mirrored straight back into the window) and any stale in-flight latch.
+            " rawset(_G,'__stlr_up_status',nil) rawset(_G,'__stlr_up_busy',nil)" +
             " if not (Z.EntityMgr).PlayerEnt then error('Need world: enter game first') end" +
             " local stub=require('zservice/photograph_ntf_impl')" +
             " local origRet=stub.RetAvatarToken" +
@@ -116,13 +128,23 @@ public sealed partial class Plugin
             " if not cvm then error('No camera VM') end" +
             " local origGetToken=cvm.GetHeadOrBodyPhotoToken rawset(_G,'__stlr_up_origGetToken',origGetToken)" +
             " cvm.GetHeadOrBodyPhotoToken=function(texId,snapType)" +
+            // In-flight guard: the S4 idcard_view confirm calls GetHeadOrBodyPhotoToken TWICE per click, so
+            // one confirm would request two tokens → two uploads. Ignore further confirms while one is in
+            // flight. The latch is a timestamp, not a bool, so a confirm that never gets a token reply (the
+            // game's GetTextureSize==0 early return) can't block retries forever — it goes stale after 30 s.
+            "  local _busy=_G.__stlr_up_busy" +
+            "  if _busy and os.time()-_busy<30 then logError('[STLR] confirm ignored (in flight)') return end" +
+            "  rawset(_G,'__stlr_up_busy',os.time())" +
             // Confirm fired: install the uploader NOW, scoped to this confirm's token. pictureType is
             // snapType (head→EProfileSnapShot / halfbody→EProfileHalfBody) — auto-detects card type.
             "  stub.RetAvatarToken=function(self,call,vReq)" +
+            // One-shot: hand the slot straight back to the game so any second token reply goes to the
+            // original handler instead of starting another upload of our bytes.
+            "   stub.RetAvatarToken=origRet" +
             "   local cbOk,cbErr=pcall(function()" +
             "    logError('[STLR] uploader fired bytes='..tostring(_G.__stlr_up_bytes and #_G.__stlr_up_bytes or 'nil'))" +
-            "    if vReq.errCode~=0 then " + LuaSetStatus("'error'") + " logError('[STLR] token err '..tostring(vReq.errCode)) stub.RetAvatarToken=origRet return end" +
-            "    local r=vReq.result if not r then " + LuaSetStatus("'error'") + " logError('[STLR] no result') stub.RetAvatarToken=origRet return end" +
+            "    if vReq.errCode~=0 then " + LuaSetErrorStatus() + " logError('[STLR] token err '..tostring(vReq.errCode)) stub.RetAvatarToken=origRet return end" +
+            "    local r=vReq.result if not r then " + LuaSetErrorStatus() + " logError('[STLR] no result') stub.RetAvatarToken=origRet return end" +
             "    " + LuaSetStatus("'uploading'") +
             "    local up=(Z.UploadParm).New()" +
             "    up.TmpSecretId=r.tmpSecretId up.TmpSecretKey=r.tmpSecretKey" +
@@ -130,7 +152,7 @@ public sealed partial class Plugin
             "    up.ExpireTime=r.expiredTime up.Bucket=r.bucket up.SaveKey=r.objectKey" +
             "    up.CallBackFunc=function(isOk)" +
             "     logError('[STLR] cos isOk='..tostring(isOk))" +
-            "     if not isOk then " + LuaSetStatus("'error'") + " logError('[STLR] cos failed') stub.RetAvatarToken=origRet return end" +
+            "     if not isOk then " + LuaSetErrorStatus() + " logError('[STLR] cos failed') stub.RetAvatarToken=origRet return end" +
             "     ;(Z.CoroUtil.create_coro_xpcall)(function()" +
             "      local px=require('zproxy.photograph_proxy')" +
             "      local cs=(Z.CancelSource).Rent()" +
@@ -144,17 +166,17 @@ public sealed partial class Plugin
             // Success: fully disarm every hook and nil the origin globals (Cancel becomes a no-op).
             "       stub.RetAvatarToken=origRet stub.GetPhotoTokenNtf=origGet stub.UploadPhotoResultNtf=origUpR stub.UploadPictureResultNtf=origUpP stub.ReviewAvatarInfoNtf=origRev" +
             "       popupCls.setHeadImg=origSetHead idcardCls.setPhotoData=origSetPhoto cvm.GetHeadOrBodyPhotoToken=origGetToken" +
-            "       rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil) rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil) rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil) rawset(_G,'__stlr_up_bytes',nil)" +
-            "      else " + LuaSetStatus("'error'") + " logError('[STLR] confirm err '..(ret and tostring(ret.errCode) or '?'))" + " stub.RetAvatarToken=origRet end" +
-            "     end,function(e)" + LuaSetStatus("'error'") + " logError('[STLR] coro err '..tostring(e)) end)()" +
+            "       rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil) rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil) rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil) rawset(_G,'__stlr_up_bytes',nil) rawset(_G,'__stlr_up_busy',nil)" +
+            "      else " + LuaSetErrorStatus() + " logError('[STLR] confirm err '..(ret and tostring(ret.errCode) or '?'))" + " stub.RetAvatarToken=origRet end" +
+            "     end,function(e)" + LuaSetErrorStatus() + " logError('[STLR] coro err '..tostring(e)) end)()" +
             "    end" +
             "    local _bytes=_G.__stlr_up_bytes" +
-            "    if not _bytes or #_bytes==0 then " + LuaSetStatus("'error'") + " logError('[STLR] no image bytes') stub.RetAvatarToken=origRet return end" +
+            "    if not _bytes or #_bytes==0 then " + LuaSetErrorStatus() + " logError('[STLR] no image bytes') stub.RetAvatarToken=origRet return end" +
             "    " + LuaSetStatus("'uploading'") +
             "    logError('[STLR] calling UploadPictureToCos '..(#_bytes)..'b')" +
             "    Z.UploadMgr:UploadPictureToCos(up,_bytes)" +
             "   end)" +
-            "   if not cbOk then " + LuaSetStatus("'error'") + " logError('[STLR] cb err '..tostring(cbErr)) stub.RetAvatarToken=origRet end" +
+            "   if not cbOk then " + LuaSetErrorStatus() + " logError('[STLR] cb err '..tostring(cbErr)) stub.RetAvatarToken=origRet end" +
             "  end" +
             // Diagnostic NTF taps (self-restore on fire, only park status strings).
             "  stub.GetPhotoTokenNtf=function(self,call,vReq) stub.GetPhotoTokenNtf=origGet logError('[STLR] ntf GetPhotoTokenNtf ec='..tostring(vReq and vReq.errCode)) pcall(origGet,self,call,vReq) end" +
@@ -186,30 +208,46 @@ public sealed partial class Plugin
         _window.MarkDirty();
     }
 
+    // Lua block that puts the REAL originals back (both previews + GetToken + RetAvatarToken + the 4 NTF
+    // taps) from the _G.__stlr_up_orig* globals and nils those globals. A no-op when nothing is armed.
+    // Shared by ClearHooks and the head of the setup DoString (idempotent re-Apply). Deliberately leaves
+    // status / bytes / busy alone — each caller decides those (setup must keep the freshly pushed bytes).
+    // Wrapped in do…end so its locals can't clash with the caller's.
+    private const string LuaRestoreHooks =
+        " do" +
+        " local ok,stub=pcall(require,'zservice/photograph_ntf_impl')" +
+        " if ok and stub then" +
+        "  if _G.__stlr_up_origRet then stub.RetAvatarToken=_G.__stlr_up_origRet end" +
+        "  if _G.__stlr_up_origGet then stub.GetPhotoTokenNtf=_G.__stlr_up_origGet end" +
+        "  if _G.__stlr_up_origUpR then stub.UploadPhotoResultNtf=_G.__stlr_up_origUpR end" +
+        "  if _G.__stlr_up_origUpP then stub.UploadPictureResultNtf=_G.__stlr_up_origUpP end" +
+        "  if _G.__stlr_up_origRev then stub.ReviewAvatarInfoNtf=_G.__stlr_up_origRev end" +
+        " end" +
+        " local cvm=Z.VMMgr.GetVM('camerasys')" +
+        " if cvm and _G.__stlr_up_origGetToken then cvm.GetHeadOrBodyPhotoToken=_G.__stlr_up_origGetToken end" +
+        " local ok1,popupCls=pcall(require,'ui.view.photo_personalzone_idcard_popup_view')" +
+        " if ok1 and popupCls and _G.__stlr_up_origSetHead then popupCls.setHeadImg=_G.__stlr_up_origSetHead end" +
+        " local ok2,idcardCls=pcall(require,'ui.view.idcard_view')" +
+        " if ok2 and idcardCls and _G.__stlr_up_origSetPhoto then idcardCls.setPhotoData=_G.__stlr_up_origSetPhoto end" +
+        " rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil)" +
+        " rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil)" +
+        " rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil)" +
+        " end";
+
+    // Error status that never overwrites 'done', and releases the in-flight latch. 'done' is sticky for the
+    // rest of this upload: a late duplicate failure (e.g. the server rejecting a second confirm with 4677)
+    // must not turn a successful upload into a "failed" message. A fresh Apply clears the status first.
+    private static string LuaSetErrorStatus() =>
+        "if _G.__stlr_up_status~='done' then " + LuaSetStatus("'error'") + " end rawset(_G,'__stlr_up_busy',nil)";
+
     // Restore both preview hooks + GetToken + RetAvatarToken + the 4 NTF taps from the globals.
     private void ClearHooks()
     {
         _services.Lua.DoString(
             "pcall(function()" +
-            " local ok,stub=pcall(require,'zservice/photograph_ntf_impl')" +
-            " if ok and stub then" +
-            "  if _G.__stlr_up_origRet then stub.RetAvatarToken=_G.__stlr_up_origRet end" +
-            "  if _G.__stlr_up_origGet then stub.GetPhotoTokenNtf=_G.__stlr_up_origGet end" +
-            "  if _G.__stlr_up_origUpR then stub.UploadPhotoResultNtf=_G.__stlr_up_origUpR end" +
-            "  if _G.__stlr_up_origUpP then stub.UploadPictureResultNtf=_G.__stlr_up_origUpP end" +
-            "  if _G.__stlr_up_origRev then stub.ReviewAvatarInfoNtf=_G.__stlr_up_origRev end" +
-            " end" +
-            " local cvm=Z.VMMgr.GetVM('camerasys')" +
-            " if cvm and _G.__stlr_up_origGetToken then cvm.GetHeadOrBodyPhotoToken=_G.__stlr_up_origGetToken end" +
-            " local ok1,popupCls=pcall(require,'ui.view.photo_personalzone_idcard_popup_view')" +
-            " if ok1 and popupCls and _G.__stlr_up_origSetHead then popupCls.setHeadImg=_G.__stlr_up_origSetHead end" +
-            " local ok2,idcardCls=pcall(require,'ui.view.idcard_view')" +
-            " if ok2 and idcardCls and _G.__stlr_up_origSetPhoto then idcardCls.setPhotoData=_G.__stlr_up_origSetPhoto end" +
-            " rawset(_G,'__stlr_up_origRet',nil) rawset(_G,'__stlr_up_origGet',nil) rawset(_G,'__stlr_up_origUpR',nil)" +
-            " rawset(_G,'__stlr_up_origUpP',nil) rawset(_G,'__stlr_up_origRev',nil)" +
-            " rawset(_G,'__stlr_up_origGetToken',nil) rawset(_G,'__stlr_up_origSetHead',nil) rawset(_G,'__stlr_up_origSetPhoto',nil) rawset(_G,'__stlr_up_status',nil)" +
-            " rawset(_G,'__stlr_up_bytes',nil)" +
-            "end)");
+            LuaRestoreHooks +
+            " rawset(_G,'__stlr_up_status',nil) rawset(_G,'__stlr_up_bytes',nil) rawset(_G,'__stlr_up_busy',nil)" +
+            " end)");
         _hooksActive   = false;
         _lastLuaStatus = null;
         _uploadStatus  = _loc.T("cpi.status.cancelled");
