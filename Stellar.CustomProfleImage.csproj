@@ -32,6 +32,9 @@
     <!-- Window header glyph, pre-drawn per pixel size (tools/icons/gen-header-icon.py; Plugin.Style.Blocks.cs picks
          the size it draws at). -->
     <EmbeddedResource Include="resources/icons/customprofleimage-*.png" LogicalName="Stellar.CustomProfleImage.%(Filename)%(Extension)" />
+    <!-- Check mark (replaces the "✓" glyph, which the bold TMP font can't draw), per pixel size
+         (tools/icons/gen-check-icon.py). -->
+    <EmbeddedResource Include="resources/icons/check-*.png" LogicalName="Stellar.CustomProfleImage.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

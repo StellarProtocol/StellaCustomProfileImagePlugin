@@ -29,29 +29,43 @@ public sealed partial class Plugin
         return png;
     }
 
-    // The header glyph ships one pixel-hinted bitmap per size (house icon rule: never a master scaled down —
-    // resources/icons, drawn by tools/icons/gen-header-icon.py), so the tile asks for the PIXEL size it draws at.
-    // The launcher tile keeps its own icon (Plugin.cs LoadIconPng).
-    private static readonly int[] HeaderIconSizes = { 16, 18, 24, 32, 36, 48 };   // keep in sync with resources/icons
+    // Glyphs ship one pixel-hinted bitmap per size (house icon rule: never a master scaled down — resources/icons, drawn
+    // by tools/icons/gen-header-icon.py and gen-check-icon.py), so each element asks for the PIXEL size it draws at.
+    // The launcher tile keeps its own 64 px icon (Plugin.cs LoadIconPng).
+    private sealed class SizedIcon
+    {
+        public readonly string Prefix;
+        public readonly int[]  Sizes;          // ascending; keep in sync with the generator's SIZES
+        public float   Scale = -1f;
+        public byte[]? Picked;
+        public SizedIcon(string prefix, int[] sizes) { Prefix = prefix; Sizes = sizes; }
+    }
+
+    private readonly SizedIcon _headerIcon = new("customprofleimage-", new[] { 16, 18, 24, 32, 36, 48 });
+    // The check mark that replaced "✓" (U+2713 has no ink in the bold TMP atlas — a quad, nothing visible; bridge
+    // ui.inspect 2026-11-20): HOW TO done badges + the matching size chip, both 12 canvas units.
+    private readonly SizedIcon _checkIcon  = new("check-", new[] { 6, 8, 9, 12, 15, 18, 24 });
+    private const int CheckGlyph = 12;
 
     // `units` canvas units × the live canvas→screen scale (1.0 at 1440p, 0.75 at 1080p): an exact size (±0.05 px) draws
-    // 1:1, else the smallest LARGER drawing, else the largest. Cached until the scale changes, so the per-refresh Func is
-    // two property reads + a float compare and hands back the SAME array (ImageElement.Live compares by reference).
-    private float   _iconScale = -1f;
-    private byte[]? _iconPicked;
-
-    private byte[]? HeaderIconPng(int units)
+    // 1:1, else the smallest LARGER drawing, else the largest. Cached per icon until the scale changes, so the per-refresh
+    // Func is two property reads + a float compare and hands back the SAME array (ImageElement.Live compares by
+    // reference). Every element of one icon uses the same `units`.
+    private byte[]? IconPng(SizedIcon icon, int units)
     {
         var fw = _services.Framework;
         float scale = fw.CanvasWidth > 1 && fw.ScreenWidth > 0 ? (float)fw.ScreenWidth / fw.CanvasWidth : 1f;
-        if (scale == _iconScale && _iconPicked != null) return _iconPicked;
-        _iconScale = scale;
+        if (scale == icon.Scale && icon.Picked != null) return icon.Picked;
+        icon.Scale = scale;
         float want = units * scale;
-        int px = HeaderIconSizes[HeaderIconSizes.Length - 1];
-        for (int i = 0; i < HeaderIconSizes.Length; i++)
-            if (HeaderIconSizes[i] >= want - 0.05f) { px = HeaderIconSizes[i]; break; }
-        return _iconPicked = CachedPng("customprofleimage-" + px + ".png") ?? _iconPicked;
+        int px = icon.Sizes[icon.Sizes.Length - 1];
+        for (int i = 0; i < icon.Sizes.Length; i++)
+            if (icon.Sizes[i] >= want - 0.05f) { px = icon.Sizes[i]; break; }
+        return icon.Picked = CachedPng(icon.Prefix + px + ".png") ?? icon.Picked;
     }
+
+    private HudElement CheckImage(Func<ColorRgba?>? tint = null)
+        => new ImageElement(() => IconPng(_checkIcon, CheckGlyph), CheckGlyph, CheckGlyph) { Live = true, Tint = tint };
 
     // ── accent icon tile + ToolHeader ─────────────────────────────────────────────────────────────────────────────
     // A rounded tile in the LIVE theme accent with the flat white glyph centred (art can't follow the theme, so the colour
@@ -76,7 +90,7 @@ public sealed partial class Plugin
     private HudElement ToolHeader(Func<string> title, Func<string> status, Func<ColorRgba> statusColor, float statusWidth)
         => new RowElement(new HudElement[]
         {
-            IconBox(() => HeaderIconPng(ToolGlyphSize), ToolIconSize, ToolGlyphSize),
+            IconBox(() => IconPng(_headerIcon, ToolGlyphSize), ToolIconSize, ToolGlyphSize),
             new ColumnElement(new HudElement[]
             {
                 new TextElement(title, Color: () => TextColor(), Emphasis: true, NoWrap: true),
@@ -90,20 +104,26 @@ public sealed partial class Plugin
     // so a state change never moves anything (rule 14). Bubble.MaxWidth pins the width (a MaxWidth-0 bubble under a
     // Conditional caps itself at the 100 px default — MinimalNameplate, KB Stellar-Design-Language).
     //   off  (no image)      = muted regular text on the tile fill
-    //   on   (match/mismatch) = bold text in the status colour on a 22 % wash of it (green ✓ / amber warning)
-    private const float ChipHeight = 24f;
-    private const float ChipPadX   = 8f;
+    //   match    = a check icon + bold label, both in the status green, on a STRONGER 32 % green wash (reads clearly
+    //              green — user 2026-11-20); the icon sits at the chip's left padding and the label centres in the rest
+    //              (no text-measure API, so the pair can't be centred as a group; the chip itself never changes size)
+    //   mismatch = bold amber text on a 22 % wash
+    private const float ChipHeight   = 24f;
+    private const float ChipPadX     = 8f;
+    private const float ChipIconGap  = 6f;
+    private const float OkChipWash   = 0.32f;
 
-    private HudElement ChipShell(HudElement label, Func<ColorRgba> fill, float width) => new BubbleElement(
-        new RowElement(new HudElement[]
-        {
-            new SpacerElement(0f, ChipHeight),   // height strut = the side (house rule 4: no stacked spacers)
-            label,
-        }, Gap: 0.01f, Justify: RowJustify.Center))
+    private HudElement ChipShell(HudElement[] content, Func<ColorRgba> fill, float width)
     {
+        var items = new HudElement[content.Length + 1];
+        items[0] = new SpacerElement(0f, ChipHeight);   // height strut = the side (house rule 4: no stacked spacers)
+        Array.Copy(content, 0, items, 1, content.Length);
+        return new BubbleElement(new RowElement(items, Gap: 0.01f, Justify: RowJustify.Center))
+        {
         FillColorFn = () => fill(),
-        CornerRadius = RoundRadius(ChipHeight), PaddingX = 0f, PaddingY = 0f, MaxWidth = width,
-    };
+            CornerRadius = RoundRadius(ChipHeight), PaddingX = 0f, PaddingY = 0f, MaxWidth = width,
+        };
+    }
 
     private HudElement SizeChip(Func<bool> hasImage, Func<bool> match,
         Func<string> offLabel, Func<string> okLabel, Func<string> badLabel, float width)
@@ -111,18 +131,25 @@ public sealed partial class Plugin
         var okText  = new ContrastCache();
         var badText = new ContrastCache();
         float labelW = width - 2f * ChipPadX;
-        ColorRgba OkFill()  => Over(Menu.Success with { A = ChipWashAlpha }, PanelColor());
+        ColorRgba OkFill()  => Over(Menu.Success with { A = OkChipWash }, PanelColor());
         ColorRgba BadFill() => Over(Menu.Caution with { A = ChipWashAlpha }, PanelColor());
+        ColorRgba OkInk()   => okText.Get(Menu.Success, OkFill(), PillMinContrast);
 
-        HudElement Bold(Func<string> text, Func<ColorRgba> color) => new TextElement(text, Color: () => color(),
-            Width: labelW, Align: TextAlign.Center, NoWrap: true, FontSize: 12) { Bold = true, Ellipsize = true, CenterCaps = true };
+        HudElement Bold(Func<string> text, Func<ColorRgba> color, float w) => new TextElement(text, Color: () => color(),
+            Width: w, Align: TextAlign.Center, NoWrap: true, FontSize: 12) { Bold = true, Ellipsize = true, CenterCaps = true };
 
-        var ok  = ChipShell(Bold(okLabel,  () => okText.Get(Menu.Success, OkFill(), PillMinContrast)),
+        // Icon + gap + label = labelW, so the ok chip lays out exactly like the text-only ones.
+        var ok  = ChipShell(new HudElement[]
+                            {
+                                CheckImage(() => OkInk()),
+                                new SpacerElement(ChipIconGap - 1f, 1f),   // a SpacerElement(w) takes w + 1
+                                Bold(okLabel, OkInk, labelW - CheckGlyph - ChipIconGap),
+                            },
                             () => Fade(OkFill()), width);
-        var bad = ChipShell(Bold(badLabel, () => badText.Get(Menu.Caution, BadFill(), PillMinContrast)),
+        var bad = ChipShell(new[] { Bold(badLabel, () => badText.Get(Menu.Caution, BadFill(), PillMinContrast), labelW) },
                             () => Fade(BadFill()), width);
-        var off = ChipShell(new TextElement(offLabel, Color: () => MutedColor(), Width: labelW, Align: TextAlign.Center,
-                                NoWrap: true) { Ellipsize = true },
+        var off = ChipShell(new HudElement[] { new TextElement(offLabel, Color: () => MutedColor(), Width: labelW,
+                                Align: TextAlign.Center, NoWrap: true) { Ellipsize = true } },
                             () => Fade(TileColor()), width);
         return new CellElement(new ConditionalElement(hasImage, new ConditionalElement(match, ok, bad), off), Width: width);
     }

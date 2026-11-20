@@ -259,8 +259,11 @@ public sealed partial class Plugin
     }
 
     // ── HOW TO ────────────────────────────────────────────────────────────────────────────────────────────────────
-    // Four steps that double as progress: done = green ✓ badge + muted text; current = accent badge on an accent-tinted
-    // row; pending = a plain number badge. Labels and colours are Funcs over CurrentStep(), so nothing is rebuilt.
+    // Four steps that double as progress: done = a SOLID status-green badge with the white check icon + muted text (the
+    // old 22 % green wash read as an empty dark circle — user 2026-11-20; "✓" itself drew blank in bold TMP); current =
+    // accent badge on an accent-tinted row; pending = a plain number badge. Two complete badges swapped by a Conditional
+    // in a fixed 22 px cell (an image and a text can't share one bubble live), so a step never moves; labels and colours
+    // are Funcs over CurrentStep(), so nothing is rebuilt.
     private static readonly string[] StepKeys = { "cpi.howto.step1", "cpi.howto.step2", "cpi.howto.step3", "cpi.howto.step4" };
     private static readonly string[] StepNumbers = { "1", "2", "3", "4" };
 
@@ -276,26 +279,32 @@ public sealed partial class Plugin
 
     private HudElement StepRow(int i)
     {
-        var badgeText = new ContrastCache();
         var badgeSolid = new SolidLabelCache();
         bool Done() => CurrentStep() > i;
         bool Cur()  => CurrentStep() == i;
         ColorRgba RowBg() => Cur() ? Over(Menu.MenuAccent with { A = CurrentStepMix }, PanelColor()) : PanelColor();
-        ColorRgba DoneFill() => Over(Menu.Success with { A = ChipWashAlpha }, RowBg());
 
-        var badge = new BubbleElement(new RowElement(new HudElement[]
+        var numberBadge = new BubbleElement(new RowElement(new HudElement[]
             {
                 new SpacerElement(0f, StepBadge),
-                new TextElement(() => Done() ? "✓" : StepNumbers[i],
-                    Color: () => Done() ? badgeText.Get(Menu.Success, DoneFill(), PillMinContrast)
-                               : Cur()  ? badgeSolid.Get(AccentColor())
-                                        : MutedColor(),
+                new TextElement(() => StepNumbers[i],
+                    Color: () => Cur() ? badgeSolid.Get(AccentColor()) : MutedColor(),
                     Width: StepBadge, Align: TextAlign.Center, NoWrap: true, FontSize: 12) { Bold = true, CenterCaps = true },
             }, Gap: 0.01f, Justify: RowJustify.Center))
         {
-            FillColorFn = () => Fade(Done() ? DoneFill() : Cur() ? AccentColor() : TileColor()),
+            FillColorFn = () => Fade(Cur() ? AccentColor() : TileColor()),
             CornerRadius = RoundRadius(StepBadge), PaddingX = 0f, PaddingY = 0f, MaxWidth = StepBadge,
         };
+        // 22 px = 5 + 12 px check + 5 (the IconBox build: padding centres the fixed-size image, the Row keeps it square).
+        // The white check stays white on the theme's Success green (darker on Light, so it only gets stronger there).
+        float pad = (StepBadge - CheckGlyph) / 2f;
+        var doneBadge = new BubbleElement(new RowElement(new HudElement[] { CheckImage() }, Gap: 0.01f,
+            Justify: RowJustify.Center))
+        {
+            FillColorFn = () => Fade(Menu.Success),
+            CornerRadius = RoundRadius(StepBadge), PaddingX = pad, PaddingY = pad, MaxWidth = StepBadge,
+        };
+        var badge = new CellElement(new ConditionalElement(Done, doneBadge, numberBadge), Width: StepBadge);
 
         var key = StepKeys[i];
         return new BubbleElement(new RowElement(new HudElement[]
