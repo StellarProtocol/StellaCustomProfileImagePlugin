@@ -15,10 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- i18n P2: consumes IPluginServices.Localization (framework 2.1.0). -->
-    <PackageReference Include="Stellar.Abstractions" Version="2.3.0" />
-    <PackageReference Include="Stellar.PluginContracts" Version="2.0.0" />
-    <PackageReference Include="Stellar.Plugin.InteropRefs" Version="2.0.0" />
+    <!-- 2.33.0: house-style UI (theme status colours 2.30, TextElement.CenterCaps 2.33); Localization since 2.1.0. -->
+    <PackageReference Include="Stellar.Abstractions" Version="2.33.0" />
+    <PackageReference Include="Stellar.PluginContracts" Version="2.33.0" />
+    <PackageReference Include="Stellar.Plugin.InteropRefs" Version="2.33.0" />
   </ItemGroup>
 
   <ItemGroup>
