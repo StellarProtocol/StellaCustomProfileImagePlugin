@@ -34,8 +34,13 @@ public sealed partial class Plugin : IStellarPlugin
     private string? _lastLuaStatus = null;
 
     private string           _selectedImagePath   = "";
+    private string           _selectedFileName    = "";   // Path.GetFileName, resolved once per pick (polled by the UI)
     private byte[]?          _previewPngBytes     = null;
-    private int              _previewHeight       = 200;
+    // PNG IHDR size of the picked file (0 = unknown / not a PNG) + the size-check verdicts, computed once per pick.
+    private int              _previewPxW          = 0;
+    private int              _previewPxH          = 0;
+    private bool             _avatarMatch         = false;
+    private bool             _namecardMatch       = false;
     private static Plugin?   _instance;
     private volatile string? _pendingSelectedPath = null;
     private volatile bool    _dialogOpen          = false;
@@ -72,102 +77,9 @@ public sealed partial class Plugin : IStellarPlugin
         _services.Log.Info("[CustomProfileImage] constructed");
     }
 
-    private IWindowControl RegisterWindow()
-    {
-        var capturedBytes  = _previewPngBytes;
-        var capturedHeight = _previewHeight;
-
-        var elements = new System.Collections.Generic.List<HudElement>
-        {
-            new SeparatorElement(),
-            new ButtonElement(
-                Label:   () => _selectedImagePath.Length > 0
-                             ? System.IO.Path.GetFileName(_selectedImagePath)
-                             : _loc.T("cpi.chooseFile"),
-                OnClick: ChooseFile,
-                Enabled: () => !_dialogOpen,
-                Width:   270f),
-        };
-
-        elements.AddRange(new HudElement[]
-        {
-            new SeparatorElement(),
-            // Recommended-size reference — one image serves both, so show both target sizes.
-            new TextElement(() => _loc.T("cpi.recommendedSize"), Emphasis: true),
-            new TextElement(() => _loc.T("cpi.avatar.hint"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new TextElement(() => _loc.T("cpi.namecard.hint"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new SeparatorElement(),
-            // How-to instruction block.
-            new TextElement(() => _loc.T("cpi.howto.title"), Emphasis: true),
-            new TextElement(() => _loc.T("cpi.howto.step1"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new TextElement(() => _loc.T("cpi.howto.step2"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new TextElement(() => _loc.T("cpi.howto.step3"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new TextElement(() => _loc.T("cpi.howto.step4"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new TextElement(() => _loc.T("cpi.howto.step5"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new TextElement(() => _loc.T("cpi.howto.step6"),
-                            Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted),
-            new SeparatorElement(),
-            new RowElement(new HudElement[]
-            {
-                new ButtonElement(
-                    Label:   () => _loc.T("cpi.apply"),
-                    OnClick: ApplyUpload,
-                    Enabled: () => !_dialogOpen && _selectedImagePath.Length > 0,
-                    // Wide enough for the longest localized label on ONE line:
-                    // CJK ja "アバター／ネームカードを作成" (14 full-width glyphs) is the constraint.
-                    Width:   280f),
-                new ButtonElement(
-                    Label:   () => _loc.T("cpi.cancel"),
-                    OnClick: ClearHooks,
-                    Enabled: () => _hooksActive,
-                    Width:   95f),
-            }, Gap: 8f),
-            new ConditionalElement(
-                () => _uploadStatus.Length > 0,
-                new TextElement(() => _uploadStatus,
-                                Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted)),
-        });
-
-        if (capturedBytes != null)
-        {
-            elements.Add(new SeparatorElement());
-            elements.Add(new TextElement(() => _loc.T("cpi.preview"), Emphasis: true));
-            elements.Add(new TextElement(
-                () => _loc.T("cpi.preview.hint"),
-                Color: () => (ColorRgba?)_services.Theme.Colors.TextMuted));
-            elements.Add(new RowElement(new HudElement[]
-            {
-                new SpacerElement(Width: 58f),
-                new ImageElement(
-                    Png:    () => capturedBytes,
-                    Width:  300,
-                    Height: capturedHeight),
-                new SpacerElement(Width: 58f),
-            }));
-        }
-
-        return _services.Windows.Register(new WindowRegistration(
-            Spec: new WindowSpec(
-                Id:          "customprofleimage.main",
-                Title:       _loc.T("cpi.title"),
-                DefaultRect: new WindowRect(_services.Framework.ScreenWidth - 520f, 20f, 500f, 0f),
-                Category:    WindowCategory.Tools,
-                Style:       WindowPanelStyle.GlassMenu)
-            { Draggable = true, Closable = true, StartVisible = false,
-              // Gameplay tool: upload requires being in-world (checks Z.EntityMgr.PlayerEnt).
-              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
-                                && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
-            Root:    new ColumnElement(elements.ToArray(), Gap: 8f),
-            OnClose: () => _window.SetVisible(false)));
-    }
-
+    // A new pick re-registers the window so the PREVIEW ImageElement (fixed size at build time) gets the new picture's
+    // aspect-fit size. Only the picture inside the fixed frame changes: the window keeps its width (DefaultRect) and
+    // height (fixed content), and SetRect on a non-resizable window restores the position only.
     private void RebuildWindow()
     {
         var rect    = _window.Rect;
@@ -236,7 +148,9 @@ public sealed partial class Plugin : IStellarPlugin
         if (pending != null)
         {
             _pendingSelectedPath = null;
-            if (_hooksActive) { ClearHooks(); _uploadStatus = ""; }
+            if (_hooksActive) ClearHooks();
+            // A new file starts clean: no "cancelled" / error text left over from the previous one.
+            _uploadStatus      = "";
             _selectedImagePath = pending;
             LoadPreview(pending);
             RebuildWindow();
@@ -271,28 +185,40 @@ public sealed partial class Plugin : IStellarPlugin
         _           => code,
     };
 
+    // Target shapes for the size check (one image serves both): avatar 1:1, namecard 468×774. A chip shows a match when
+    // the picked image's aspect ratio is within SizeTolerance of the target — the game crops/scales, so only the SHAPE
+    // matters, not the exact pixel size.
+    private const float AvatarAspect   = 1f;
+    private const float NamecardAspect = 468f / 774f;
+    private const float SizeTolerance  = 0.05f;
+
+    private static bool AspectMatches(int w, int h, float target)
+        => w > 0 && h > 0 && MathF.Abs((float)w / h / target - 1f) <= SizeTolerance;
+
     private void LoadPreview(string path)
     {
+        _selectedFileName = System.IO.Path.GetFileName(path);
+        _previewPxW = _previewPxH = 0;
         try
         {
             var bytes = System.IO.File.ReadAllBytes(path);
             if (bytes.Length >= 24 && bytes[0] == 0x89 && bytes[1] == (byte)'P' &&
                 bytes[2] == (byte)'N'  && bytes[3] == (byte)'G')
             {
-                int pw = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
-                int ph = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
-                _previewHeight = (pw > 0) ? Math.Max(1, (int)(300f * ph / pw)) : 300;
+                _previewPxW = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+                _previewPxH = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+                if (_previewPxW <= 0 || _previewPxH <= 0) _previewPxW = _previewPxH = 0;
             }
-            else _previewHeight = 200;
             _previewPngBytes = bytes;
-            _services.Log.Info($"[CustomProfileImage] LoadPreview: {bytes.Length} bytes, 200x{_previewHeight}");
+            _services.Log.Info($"[CustomProfileImage] LoadPreview: {bytes.Length} bytes, {_previewPxW}x{_previewPxH}");
         }
         catch (Exception ex)
         {
             _previewPngBytes = null;
-            _previewHeight   = 200;
             _services.Log.Warning($"[CustomProfileImage] LoadPreview failed: {ex.Message}");
         }
+        _avatarMatch   = AspectMatches(_previewPxW, _previewPxH, AvatarAspect);
+        _namecardMatch = AspectMatches(_previewPxW, _previewPxH, NamecardAspect);
     }
 
     // Capture the running main LuaState the first time DoString is called. `__instance` is the LuaState the
@@ -314,7 +240,8 @@ public sealed partial class Plugin : IStellarPlugin
             if (pending != null)
             {
                 _instance._pendingSelectedPath = null;
-                if (_instance._hooksActive) { _instance.ClearHooks(); _instance._uploadStatus = ""; }
+                if (_instance._hooksActive) _instance.ClearHooks();
+                _instance._uploadStatus      = "";
                 _instance._selectedImagePath = pending;
                 _instance.LoadPreview(pending);
                 _instance.RebuildWindow();

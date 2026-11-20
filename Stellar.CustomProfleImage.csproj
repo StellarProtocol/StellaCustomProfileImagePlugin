@@ -9,7 +9,7 @@
     <NoWarn>CS8632;CS8765</NoWarn>
     <RootNamespace>Stellar.CustomProfleImage</RootNamespace>
     <AssemblyName>Stellar.CustomProfleImage</AssemblyName>
-    <Version>2.3.0</Version>
+    <Version>2.4.0</Version>
     <Deterministic>true</Deterministic>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
@@ -29,6 +29,9 @@
     <EmbeddedResource Include="Lang/id.json" LogicalName="Stellar.CustomProfleImage.Lang.id.json" />
     <EmbeddedResource Include="Lang/fil.json" LogicalName="Stellar.CustomProfleImage.Lang.fil.json" />
     <EmbeddedResource Include="Lang/ko.json" LogicalName="Stellar.CustomProfleImage.Lang.ko.json" />
+    <!-- Window header glyph, pre-drawn per pixel size (tools/icons/gen-header-icon.py; Plugin.Style.Blocks.cs picks
+         the size it draws at). -->
+    <EmbeddedResource Include="resources/icons/customprofleimage-*.png" LogicalName="Stellar.CustomProfleImage.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
